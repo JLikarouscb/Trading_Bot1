@@ -5,13 +5,14 @@
 //   "Objetivo" -> tocó la liquidez objetivo
 //   "Hora"     -> cierre forzado a la hora de salida
 // La tabla "Embudo" (arriba a la derecha) cuenta en qué paso se quedan los días sin trade.
-// Margen 5 % (apalancamiento 20:1, como un CFD de índice). Con el margen por defecto de Pine v6 (100 %)
-// la cuenta de 10,000 USD no alcanza para abrir NAS100 y TradingView rechaza todas las órdenes.
+// Margen del motor 0.5 % para que TradingView nunca rechace órdenes en silencio. El límite real de
+// apalancamiento lo controla el parámetro "Apalancamiento máximo": si el tamaño por riesgo lo supera,
+// el tamaño se recorta (y el riesgo real queda por debajo del %). La tabla Embudo cuenta esos casos.
 // Resultados BRUTOS (sin spread). El backtest oficial, neto de costos, se hará en Python.
 // Reglas: docs/reglas_modelo_a.md
 
 //@version=6
-strategy("Modelo A: estrategia", overlay = true, initial_capital = 10000, currency = currency.USD, process_orders_on_close = false, margin_long = 5, margin_short = 5, max_boxes_count = 500, max_labels_count = 500)
+strategy("Modelo A: estrategia", overlay = true, initial_capital = 10000, currency = currency.USD, process_orders_on_close = false, margin_long = 0.5, margin_short = 0.5, max_boxes_count = 500, max_labels_count = 500)
 
 // ---------- Parámetros ----------
 tz          = "America/New_York"
@@ -33,6 +34,7 @@ useReaction = input.bool(true, "Exigir vela de reacción", group = "Setup")
 stopPad     = input.float(2.0, "Margen del stop (puntos)", minval = 0, group = "Riesgo")
 minRR       = input.float(1.5, "R mínima al objetivo", minval = 0, group = "Riesgo")
 riskPct     = input.float(1.0, "Riesgo por trade (% de la cuenta)", minval = 0.1, maxval = 5, group = "Riesgo")
+maxLev      = input.float(20, "Apalancamiento máximo (x)", minval = 1, maxval = 200, group = "Riesgo", tooltip = "Valor nocional máximo = cuenta × este número. Revisa el apalancamiento real de tu cuenta Pepperstone.")
 showLevels  = input.bool(false, "Mostrar niveles de Asia / Londres / día anterior", group = "Vista")
 showSetup   = input.bool(false, "Mostrar barridos, BOS y FVG", group = "Vista")
 showFunnel  = input.bool(true, "Mostrar tabla Embudo", group = "Vista")
@@ -87,6 +89,7 @@ var int nFvg   = 0
 var int nTouch = 0
 var int nRRno  = 0
 var int nTrade = 0
+var int nCap   = 0
 var bool dTouch = false
 var bool dRRno  = false
 
@@ -150,8 +153,12 @@ nearestBelow(float px) =>
 
 // Tamaño para arriesgar riskPct % de la cuenta
 qtyFor(float riskPts) =>
-    q = strategy.equity * riskPct / 100 / (riskPts * syminfo.pointvalue)
-    math.floor(q * 100) / 100
+    q    = strategy.equity * riskPct / 100 / (riskPts * syminfo.pointvalue)
+    qMax = strategy.equity * maxLev / (close * syminfo.pointvalue)
+    math.floor(math.min(q, qMax) * 100) / 100
+
+isCapped(float riskPts) =>
+    strategy.equity * riskPct / 100 / (riskPts * syminfo.pointvalue) > strategy.equity * maxLev / (close * syminfo.pointvalue)
 
 // ¿Hay un FVG alcista válido que termina en la vela i? (low[i] > high[i+2])
 bullFvgOk(int i) =>
@@ -220,6 +227,7 @@ if isLong and inWin and not traded and flat
                         tradeStop := stopLvl
                         tradeTgt  := tgt
                         nTrade    += 1
+                        nCap      += isCapped(risk) ? 1 : 0
                         strategy.entry("Largo", strategy.long, qty = q, comment = "Entrada")
                         strategy.exit("Salida L", from_entry = "Largo", stop = tradeStop, limit = tradeTgt, comment_loss = "Stop", comment_profit = "Objetivo")
                 else if not dRRno
@@ -276,6 +284,7 @@ if isShort and inWin and not traded and flat
                         tradeStop := stopLvl
                         tradeTgt  := tgt
                         nTrade    += 1
+                        nCap      += isCapped(risk) ? 1 : 0
                         strategy.entry("Corto", strategy.short, qty = q, comment = "Entrada")
                         strategy.exit("Salida C", from_entry = "Corto", stop = tradeStop, limit = tradeTgt, comment_loss = "Stop", comment_profit = "Objetivo")
                 else if not dRRno
@@ -300,7 +309,7 @@ plot(showLevels ? pdl : na, "Mínimo día anterior", color.new(color.gray, 30), 
 bgcolor(inWin ? color.new(color.yellow, 92) : na, title = "Ventana de entrada")
 
 // ---------- Tabla Embudo ----------
-var table funnel = table.new(position.top_right, 2, 9, bgcolor = color.new(color.black, 20), border_width = 1)
+var table funnel = table.new(position.top_right, 2, 10, bgcolor = color.new(color.black, 20), border_width = 1)
 if showFunnel and barstate.islast
     table.cell(funnel, 0, 0, "Embudo", text_color = color.white, text_size = size.small)
     table.cell(funnel, 1, 0, "Días", text_color = color.white, text_size = size.small)
@@ -318,4 +327,6 @@ if showFunnel and barstate.islast
     table.cell(funnel, 1, 6, str.tostring(nRRno), text_color = color.gray, text_size = size.small)
     table.cell(funnel, 0, 7, "5. Trades", text_color = color.white, text_size = size.small)
     table.cell(funnel, 1, 7, str.tostring(nTrade), text_color = color.white, text_size = size.small)
-    table.cell(funnel, 0, 8, syminfo.tickerid + " · " + timeframe.period, text_color = color.gray, text_size = size.tiny)
+    table.cell(funnel, 0, 8, "   (tamaño recortado por apalancamiento)", text_color = color.gray, text_size = size.small)
+    table.cell(funnel, 1, 8, str.tostring(nCap), text_color = color.gray, text_size = size.small)
+    table.cell(funnel, 0, 9, syminfo.tickerid + " · " + timeframe.period, text_color = color.gray, text_size = size.tiny)
