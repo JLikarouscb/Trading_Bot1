@@ -9,7 +9,7 @@ Plan completo y criterios de validación: documento "Plan de arranque: bot de en
 
 | Carpeta | Qué contiene | Estado |
 | --- | --- | --- |
-| `pine/` | Indicadores de TradingView para revisar las reglas a ojo | Modelo A listo para revisar |
+| `pine/` | Modelo A en TradingView: `modelo_a_estrategia.pine` (trades con entrada, stop, objetivo y salida) e indicador de revisión | Listo para revisar |
 | `docs/` | Reglas de cada modelo, escritas sin ambigüedad | Modelo A (borrador) |
 | `estrategias/` | Reglas en Python, funciones puras usadas igual en backtest y en vivo | Pendiente |
 | `backtest/` | Motor de backtest, control de entradas al azar y oráculo de bias | Pendiente |

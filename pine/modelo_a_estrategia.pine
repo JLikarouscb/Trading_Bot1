@@ -1,0 +1,240 @@
+// Modelo A como ESTRATEGIA: barrido + BOS + FVG + vela de reacción
+// Cada trade aparece en el gráfico y en el Probador de Estrategias con:
+//   "Entrada"  -> se abre al inicio de la vela siguiente a la vela de reacción
+//   "Stop"     -> tocó el stop
+//   "Objetivo" -> tocó la liquidez objetivo
+//   "Hora"     -> cierre forzado a la hora de salida
+// Resultados BRUTOS (sin spread). El backtest oficial, neto de costos, se hará en Python.
+// Reglas: docs/reglas_modelo_a.md
+
+//@version=6
+strategy("Modelo A: estrategia", overlay = true, initial_capital = 10000, currency = currency.USD, process_orders_on_close = false, max_boxes_count = 500, max_labels_count = 500)
+
+// ---------- Parámetros ----------
+tz          = "America/New_York"
+biasIn      = input.string("LONG", "Bias del día", options = ["LONG", "SHORT", "OFF", "ORACULO"], group = "Bias", tooltip = "ORACULO usa la dirección real del día (mira al futuro a propósito). Solo sirve para medir la calidad de las entradas, nunca como resultado esperado.")
+asiaSess    = input.session("2000-0000", "Sesión Asia (hora NY)", group = "Horarios")
+lonSess     = input.session("0200-0500", "Sesión Londres (hora NY)", group = "Horarios")
+winSess     = input.session("0930-1130", "Ventana de entrada (hora NY)", group = "Horarios")
+exitSess    = input.session("1200-1700", "Cierre forzado desde (hora NY)", group = "Horarios")
+useAsia     = input.bool(true, "Liquidez: Asia", group = "Liquidez")
+useLon      = input.bool(true, "Liquidez: Londres", group = "Liquidez")
+usePrevDay  = input.bool(true, "Liquidez: día anterior", group = "Liquidez")
+swingLen    = input.int(2, "Velas a cada lado del swing", minval = 1, group = "Setup")
+fvgLookback = input.int(3, "Velas antes del BOS donde buscar el FVG", minval = 0, maxval = 10, group = "Setup")
+minFvgPts   = input.float(0.0, "Tamaño mínimo del FVG (puntos)", minval = 0, group = "Setup")
+useFib      = input.bool(true, "Exigir FVG en descuento/premium", group = "Setup")
+fibLevel    = input.float(0.5, "Nivel Fibonacci máximo del FVG", minval = 0.1, maxval = 0.9, step = 0.05, group = "Setup")
+useReaction = input.bool(true, "Exigir vela de reacción", group = "Setup")
+stopPad     = input.float(2.0, "Margen del stop (puntos)", minval = 0, group = "Riesgo")
+minRR       = input.float(1.5, "R mínima al objetivo", minval = 0, group = "Riesgo")
+riskPct     = input.float(1.0, "Riesgo por trade (% de la cuenta)", minval = 0.1, maxval = 5, group = "Riesgo")
+showLevels  = input.bool(false, "Mostrar niveles de Asia / Londres / día anterior", group = "Vista")
+showSetup   = input.bool(false, "Mostrar barridos, BOS y FVG", group = "Vista")
+
+// Oráculo: vela diaria del broker, con lookahead a propósito (dirección conocida del día)
+[dOpen, dClose] = request.security(syminfo.tickerid, "D", [open, close], lookahead = barmerge.lookahead_on)
+isLong  = biasIn == "LONG" or (biasIn == "ORACULO" and dClose > dOpen)
+isShort = biasIn == "SHORT" or (biasIn == "ORACULO" and dClose < dOpen)
+
+// ---------- Sesiones ----------
+inSess(string s) =>
+    not na(time(timeframe.period, s, tz))
+
+inAsia = inSess(asiaSess)
+inLon  = inSess(lonSess)
+inWin  = inSess(winSess)
+inExit = inSess(exitSess)
+newDay = inAsia and not inAsia[1]
+winEnd = not inWin and inWin[1]
+
+[pdh, pdl] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+// ---------- Estado ----------
+var float asiaH = na
+var float asiaL = na
+var float lonH  = na
+var float lonL  = na
+var bool  lonDone = false
+
+var bool  swept    = false
+var float sweepExt = na
+var bool  bos      = false
+var float bosExt   = na
+var float fvgTop   = na
+var float fvgBot   = na
+var float stopLvl  = na
+var bool  traded   = false
+
+var float tradeStop = na
+var float tradeTgt  = na
+
+var float lastSH = na
+var float lastSL = na
+
+if newDay
+    asiaH   := high
+    asiaL   := low
+    lonH    := na
+    lonL    := na
+    lonDone := false
+    traded  := false
+    swept   := false
+    bos     := false
+    fvgTop  := na
+else if inAsia
+    asiaH := math.max(nz(asiaH, high), high)
+    asiaL := math.min(nz(asiaL, low), low)
+
+if inLon
+    lonH := math.max(nz(lonH, high), high)
+    lonL := math.min(nz(lonL, low), low)
+if not inLon and inLon[1]
+    lonDone := true
+
+// Al cerrar la ventana el setup pendiente se descarta
+if winEnd
+    swept  := false
+    bos    := false
+    fvgTop := na
+
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+if not na(ph)
+    lastSH := ph
+if not na(pl)
+    lastSL := pl
+
+sellSideHit = (useAsia and not na(asiaL) and low < asiaL) or (useLon and lonDone and not na(lonL) and low < lonL) or (usePrevDay and not na(pdl) and low < pdl)
+buySideHit  = (useAsia and not na(asiaH) and high > asiaH) or (useLon and lonDone and not na(lonH) and high > lonH) or (usePrevDay and not na(pdh) and high > pdh)
+
+nearestAbove(float px) =>
+    float t = na
+    if useAsia and not na(asiaH) and asiaH > px
+        t := na(t) ? asiaH : math.min(t, asiaH)
+    if useLon and lonDone and not na(lonH) and lonH > px
+        t := na(t) ? lonH : math.min(t, lonH)
+    if usePrevDay and not na(pdh) and pdh > px
+        t := na(t) ? pdh : math.min(t, pdh)
+    t
+
+nearestBelow(float px) =>
+    float t = na
+    if useAsia and not na(asiaL) and asiaL < px
+        t := na(t) ? asiaL : math.max(t, asiaL)
+    if useLon and lonDone and not na(lonL) and lonL < px
+        t := na(t) ? lonL : math.max(t, lonL)
+    if usePrevDay and not na(pdl) and pdl < px
+        t := na(t) ? pdl : math.max(t, pdl)
+    t
+
+// Tamaño para arriesgar riskPct % de la cuenta
+qtyFor(float riskPts) =>
+    q = strategy.equity * riskPct / 100 / (riskPts * syminfo.pointvalue)
+    math.floor(q * 100) / 100
+
+longSig  = false
+shortSig = false
+flat     = strategy.position_size == 0
+
+// ---------- Largos ----------
+if isLong and inWin and not traded and flat
+    if not swept and sellSideHit
+        swept    := true
+        sweepExt := low
+        if showSetup
+            label.new(bar_index, low, "Barrido", style = label.style_label_up, color = color.new(color.orange, 20), textcolor = color.white, size = size.tiny)
+    else if swept and not bos
+        sweepExt := math.min(sweepExt, low)
+        if not na(lastSH) and close > lastSH
+            bos    := true
+            bosExt := high
+            for i = 0 to fvgLookback
+                if low[i] > high[i + 2] and low[i] - high[i + 2] >= minFvgPts
+                    top = low[i]
+                    bot = high[i + 2]
+                    eq  = sweepExt + fibLevel * (bosExt - sweepExt)
+                    if not useFib or (top + bot) / 2 <= eq
+                        fvgTop  := top
+                        fvgBot  := bot
+                        stopLvl := low[i + 2] - stopPad
+                        if showSetup
+                            box.new(bar_index - i - 2, top, bar_index + 20, bot, border_color = color.new(color.green, 40), bgcolor = color.new(color.green, 85))
+                    break
+            if showSetup
+                label.new(bar_index, high, "BOS", style = label.style_label_down, color = color.new(color.green, 30), textcolor = color.white, size = size.tiny)
+    else if bos and not na(fvgTop)
+        if close < stopLvl
+            fvgTop := na
+        else if low <= fvgTop and close >= fvgBot and (not useReaction or close > open)
+            tgt  = nearestAbove(close)
+            risk = close - stopLvl
+            if not na(tgt) and risk > 0 and (tgt - close) / risk >= minRR
+                q = qtyFor(risk)
+                if q > 0
+                    longSig   := true
+                    traded    := true
+                    tradeStop := stopLvl
+                    tradeTgt  := tgt
+                    strategy.entry("Largo", strategy.long, qty = q, comment = "Entrada")
+                    strategy.exit("Salida L", from_entry = "Largo", stop = tradeStop, limit = tradeTgt, comment_loss = "Stop", comment_profit = "Objetivo")
+
+// ---------- Cortos (espejo) ----------
+if isShort and inWin and not traded and flat
+    if not swept and buySideHit
+        swept    := true
+        sweepExt := high
+        if showSetup
+            label.new(bar_index, high, "Barrido", style = label.style_label_down, color = color.new(color.orange, 20), textcolor = color.white, size = size.tiny)
+    else if swept and not bos
+        sweepExt := math.max(sweepExt, high)
+        if not na(lastSL) and close < lastSL
+            bos    := true
+            bosExt := low
+            for i = 0 to fvgLookback
+                if high[i] < low[i + 2] and low[i + 2] - high[i] >= minFvgPts
+                    top = low[i + 2]
+                    bot = high[i]
+                    eq  = sweepExt - fibLevel * (sweepExt - bosExt)
+                    if not useFib or (top + bot) / 2 >= eq
+                        fvgTop  := top
+                        fvgBot  := bot
+                        stopLvl := high[i + 2] + stopPad
+                        if showSetup
+                            box.new(bar_index - i - 2, top, bar_index + 20, bot, border_color = color.new(color.red, 40), bgcolor = color.new(color.red, 85))
+                    break
+            if showSetup
+                label.new(bar_index, low, "BOS", style = label.style_label_up, color = color.new(color.red, 30), textcolor = color.white, size = size.tiny)
+    else if bos and not na(fvgTop)
+        if close > stopLvl
+            fvgTop := na
+        else if high >= fvgBot and close <= fvgTop and (not useReaction or close < open)
+            tgt  = nearestBelow(close)
+            risk = stopLvl - close
+            if not na(tgt) and risk > 0 and (close - tgt) / risk >= minRR
+                q = qtyFor(risk)
+                if q > 0
+                    shortSig  := true
+                    traded    := true
+                    tradeStop := stopLvl
+                    tradeTgt  := tgt
+                    strategy.entry("Corto", strategy.short, qty = q, comment = "Entrada")
+                    strategy.exit("Salida C", from_entry = "Corto", stop = tradeStop, limit = tradeTgt, comment_loss = "Stop", comment_profit = "Objetivo")
+
+// ---------- Cierre forzado por hora ----------
+if inExit and strategy.position_size != 0
+    strategy.close_all(comment = "Hora")
+
+// ---------- Vista: solo lo que importa ----------
+inTrade = strategy.position_size != 0 or longSig or shortSig
+plot(inTrade ? tradeStop : na, "Stop del trade", color.red, 2, plot.style_linebr)
+plot(inTrade ? tradeTgt : na, "Objetivo del trade", color.green, 2, plot.style_linebr)
+plot(inTrade ? strategy.position_avg_price : na, "Precio de entrada", color.gray, 1, plot.style_linebr)
+
+plot(showLevels ? asiaH : na, "Máximo Asia", color.new(color.blue, 40), style = plot.style_linebr)
+plot(showLevels ? asiaL : na, "Mínimo Asia", color.new(color.blue, 40), style = plot.style_linebr)
+plot(showLevels and lonDone ? lonH : na, "Máximo Londres", color.new(color.purple, 40), style = plot.style_linebr)
+plot(showLevels and lonDone ? lonL : na, "Mínimo Londres", color.new(color.purple, 40), style = plot.style_linebr)
+plot(showLevels ? pdh : na, "Máximo día anterior", color.new(color.gray, 30), style = plot.style_stepline)
+plot(showLevels ? pdl : na, "Mínimo día anterior", color.new(color.gray, 30), style = plot.style_stepline)
+bgcolor(inWin ? color.new(color.yellow, 94) : na, title = "Ventana de entrada")
