@@ -1,0 +1,105 @@
+// Entradas FVG por ventana (solo alcistas). Sin stop ni objetivo: solo marca DÓNDE habría entrada.
+// Detección del FVG igual que "ICT Silver Bullet [LuxAlgo]":
+//   FVG alcista  = low > high[2]   (zona entre high[2] y low, caja desde la vela n-2)
+//   Activación   = low < techo del FVG y close > piso del FVG  (el precio regresa y no cierra debajo)
+// Solo cuentan los FVG formados DENTRO de la ventana. Código propio; conceptos de LuxAlgo (CC BY-NC-SA 4.0).
+
+//@version=6
+indicator("Entradas FVG por ventana", overlay = true, max_boxes_count = 500, max_labels_count = 500)
+
+tz       = "America/New_York"
+sess     = input.session("0945-1200", "Ventana (hora Nueva York)")
+minFvg   = input.float(0.0, "Tamaño mínimo del FVG (puntos)", minval = 0)
+modo     = input.string("Cada regreso al FVG", "Entradas por FVG", options = ["Cada regreso al FVG", "Solo el primer regreso"], tooltip = "Cada regreso: el FVG vuelve a dar entrada si el precio sale por arriba y regresa otra vez.")
+invMode  = input.string("Cierre bajo el FVG", "El FVG deja de valer cuando", options = ["Cierre bajo el FVG", "Cierre bajo la mitad del FVG", "Nunca dentro de la ventana"])
+showNum  = input.bool(true, "Numerar las entradas del día")
+colFvg   = input.color(color.new(color.blue, 82), "Color FVG")
+colDead  = input.color(color.new(color.gray, 88), "Color FVG invalidado")
+
+type Fvg
+    float top
+    float bot
+    bool  armed
+    int   uses
+    box   bx
+
+var Fvg[] fvgs = array.new<Fvg>()
+
+inWin    = not na(time(timeframe.period, sess, tz))
+winStart = inWin and not inWin[1]
+winEnd   = not inWin and inWin[1]
+
+// Contadores: del día y acumulados
+var int dF = 0
+var int dE = 0
+var int days = 0
+var int tF = 0
+var int tE = 0
+
+if winStart
+    fvgs.clear()
+    dF   := 0
+    dE   := 0
+    days += 1
+
+entry      = false
+float eTop = na
+float eBot = na
+
+// 1. Regresos a FVG existentes (formados en velas anteriores)
+if inWin and fvgs.size() > 0
+    for i = fvgs.size() - 1 to 0
+        f = fvgs.get(i)
+        lvl = invMode == "Cierre bajo el FVG" ? f.bot : invMode == "Cierre bajo la mitad del FVG" ? (f.top + f.bot) / 2 : na
+        if not na(lvl) and close < lvl
+            f.bx.set_right(bar_index)
+            f.bx.set_bgcolor(colDead)
+            fvgs.remove(i)
+            continue
+        f.bx.set_right(bar_index)
+        if f.armed and low < f.top and close > f.bot
+            entry   := true
+            f.armed := false
+            f.uses  += 1
+            if na(eTop) or f.top > eTop
+                eTop := f.top
+                eBot := f.bot
+        else if not f.armed and modo == "Cada regreso al FVG" and low > f.top
+            f.armed := true
+
+// 2. FVG alcista nuevo dentro de la ventana
+if inWin and low > high[2] and low - high[2] >= minFvg
+    b = box.new(bar_index - 2, low, bar_index, high[2], border_color = color.new(color.blue, 50), bgcolor = colFvg)
+    fvgs.push(Fvg.new(low, high[2], true, 0, b))
+    if fvgs.size() > 60
+        fvgs.shift()
+    dF += 1
+    tF += 1
+
+// Al cerrar la ventana los FVG dejan de dar entradas
+if winEnd
+    fvgs.clear()
+
+if entry
+    dE += 1
+    tE += 1
+    if showNum
+        label.new(bar_index, low, str.tostring(dE), style = label.style_label_up, color = color.new(color.blue, 0), textcolor = color.white, size = size.tiny, tooltip = "Entrada " + str.tostring(dE) + " del día\nFVG " + str.tostring(eBot, format.mintick) + " - " + str.tostring(eTop, format.mintick) + "\nCierre de la vela " + str.tostring(close, format.mintick))
+
+plotshape(entry and not showNum, "Entrada", shape.triangleup, location.belowbar, color.blue, size = size.small)
+bgcolor(inWin ? color.new(color.purple, 92) : na, title = "Ventana")
+
+alertcondition(entry, "Entrada FVG", "Entrada FVG alcista en {{ticker}} a {{close}}")
+
+// Tabla
+var table tb = table.new(position.top_right, 3, 3, bgcolor = color.new(color.black, 20), border_width = 1)
+if barstate.islast
+    table.cell(tb, 0, 0, "", text_color = color.white, text_size = size.small)
+    table.cell(tb, 1, 0, "FVG", text_color = color.white, text_size = size.small)
+    table.cell(tb, 2, 0, "Entradas", text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 1, "Última ventana", text_color = color.white, text_size = size.small)
+    table.cell(tb, 1, 1, str.tostring(dF), text_color = color.white, text_size = size.small)
+    table.cell(tb, 2, 1, str.tostring(dE), text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 2, "Total (" + str.tostring(days) + " días)", text_color = color.yellow, text_size = size.small)
+    table.cell(tb, 1, 2, str.tostring(tF), text_color = color.yellow, text_size = size.small)
+    table.cell(tb, 2, 2, str.tostring(tE), text_color = color.yellow, text_size = size.small)
