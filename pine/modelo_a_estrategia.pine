@@ -4,6 +4,7 @@
 //   "Stop"     -> tocó el stop
 //   "Objetivo" -> tocó la liquidez objetivo
 //   "Hora"     -> cierre forzado a la hora de salida
+// La tabla "Embudo" (arriba a la derecha) cuenta en qué paso se quedan los días sin trade.
 // Resultados BRUTOS (sin spread). El backtest oficial, neto de costos, se hará en Python.
 // Reglas: docs/reglas_modelo_a.md
 
@@ -12,8 +13,8 @@ strategy("Modelo A: estrategia", overlay = true, initial_capital = 10000, curren
 
 // ---------- Parámetros ----------
 tz          = "America/New_York"
-biasIn      = input.string("LONG", "Bias del día", options = ["LONG", "SHORT", "OFF", "ORACULO"], group = "Bias", tooltip = "ORACULO usa la dirección real del día (mira al futuro a propósito). Solo sirve para medir la calidad de las entradas, nunca como resultado esperado.")
-asiaSess    = input.session("2000-0000", "Sesión Asia (hora NY)", group = "Horarios")
+biasIn      = input.string("ORACULO", "Bias del día", options = ["ORACULO", "LONG", "SHORT", "OFF"], group = "Bias", tooltip = "ORACULO usa la dirección real del día (mira al futuro a propósito). Solo sirve para medir la calidad de las entradas, nunca como resultado esperado.")
+asiaSess    = input.session("2000-2359", "Sesión Asia (hora NY)", group = "Horarios")
 lonSess     = input.session("0200-0500", "Sesión Londres (hora NY)", group = "Horarios")
 winSess     = input.session("0930-1130", "Ventana de entrada (hora NY)", group = "Horarios")
 exitSess    = input.session("1200-1700", "Cierre forzado desde (hora NY)", group = "Horarios")
@@ -22,6 +23,7 @@ useLon      = input.bool(true, "Liquidez: Londres", group = "Liquidez")
 usePrevDay  = input.bool(true, "Liquidez: día anterior", group = "Liquidez")
 swingLen    = input.int(2, "Velas a cada lado del swing", minval = 1, group = "Setup")
 fvgLookback = input.int(3, "Velas antes del BOS donde buscar el FVG", minval = 0, maxval = 10, group = "Setup")
+fvgAfter    = input.int(5, "Velas después del BOS donde aún buscar el FVG", minval = 0, maxval = 30, group = "Setup")
 minFvgPts   = input.float(0.0, "Tamaño mínimo del FVG (puntos)", minval = 0, group = "Setup")
 useFib      = input.bool(true, "Exigir FVG en descuento/premium", group = "Setup")
 fibLevel    = input.float(0.5, "Nivel Fibonacci máximo del FVG", minval = 0.1, maxval = 0.9, step = 0.05, group = "Setup")
@@ -31,6 +33,7 @@ minRR       = input.float(1.5, "R mínima al objetivo", minval = 0, group = "Rie
 riskPct     = input.float(1.0, "Riesgo por trade (% de la cuenta)", minval = 0.1, maxval = 5, group = "Riesgo")
 showLevels  = input.bool(false, "Mostrar niveles de Asia / Londres / día anterior", group = "Vista")
 showSetup   = input.bool(false, "Mostrar barridos, BOS y FVG", group = "Vista")
+showFunnel  = input.bool(true, "Mostrar tabla Embudo", group = "Vista")
 
 // Oráculo: vela diaria del broker, con lookahead a propósito (dirección conocida del día)
 [dOpen, dClose] = request.security(syminfo.tickerid, "D", [open, close], lookahead = barmerge.lookahead_on)
@@ -41,12 +44,13 @@ isShort = biasIn == "SHORT" or (biasIn == "ORACULO" and dClose < dOpen)
 inSess(string s) =>
     not na(time(timeframe.period, s, tz))
 
-inAsia = inSess(asiaSess)
-inLon  = inSess(lonSess)
-inWin  = inSess(winSess)
-inExit = inSess(exitSess)
-newDay = inAsia and not inAsia[1]
-winEnd = not inWin and inWin[1]
+inAsia    = inSess(asiaSess)
+inLon     = inSess(lonSess)
+inWin     = inSess(winSess)
+inExit    = inSess(exitSess)
+asiaStart = inAsia and not inAsia[1]
+winStart  = inWin and not inWin[1]
+winEnd    = not inWin and inWin[1]
 
 [pdh, pdl] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
 
@@ -60,6 +64,7 @@ var bool  lonDone = false
 var bool  swept    = false
 var float sweepExt = na
 var bool  bos      = false
+var int   bosBar   = na
 var float bosExt   = na
 var float fvgTop   = na
 var float fvgBot   = na
@@ -72,16 +77,24 @@ var float tradeTgt  = na
 var float lastSH = na
 var float lastSL = na
 
-if newDay
+// Embudo: cuántos días llegan a cada paso
+var int nDays  = 0
+var int nSweep = 0
+var int nBos   = 0
+var int nFvg   = 0
+var int nTouch = 0
+var int nRRno  = 0
+var int nTrade = 0
+var bool dTouch = false
+var bool dRRno  = false
+
+// Niveles: se reinician al empezar Asia
+if asiaStart
     asiaH   := high
     asiaL   := low
     lonH    := na
     lonL    := na
     lonDone := false
-    traded  := false
-    swept   := false
-    bos     := false
-    fvgTop  := na
 else if inAsia
     asiaH := math.max(nz(asiaH, high), high)
     asiaL := math.min(nz(asiaL, low), low)
@@ -92,11 +105,16 @@ if inLon
 if not inLon and inLon[1]
     lonDone := true
 
-// Al cerrar la ventana el setup pendiente se descarta
-if winEnd
+// El setup del día se reinicia al abrir la ventana
+if winStart
+    traded := false
     swept  := false
     bos    := false
     fvgTop := na
+    dTouch := false
+    dRRno  := false
+    if isLong or isShort
+        nDays += 1
 
 ph = ta.pivothigh(high, swingLen, swingLen)
 pl = ta.pivotlow(low, swingLen, swingLen)
@@ -133,103 +151,143 @@ qtyFor(float riskPts) =>
     q = strategy.equity * riskPct / 100 / (riskPts * syminfo.pointvalue)
     math.floor(q * 100) / 100
 
-longSig  = false
-shortSig = false
-flat     = strategy.position_size == 0
+// ¿Hay un FVG alcista válido que termina en la vela i? (low[i] > high[i+2])
+bullFvgOk(int i) =>
+    gap = low[i] - high[i + 2]
+    mid = (low[i] + high[i + 2]) / 2
+    eq  = sweepExt + fibLevel * (bosExt - sweepExt)
+    gap > 0 and gap >= minFvgPts and (not useFib or mid <= eq)
+
+bearFvgOk(int i) =>
+    gap = low[i + 2] - high[i]
+    mid = (low[i + 2] + high[i]) / 2
+    eq  = sweepExt - fibLevel * (sweepExt - bosExt)
+    gap > 0 and gap >= minFvgPts and (not useFib or mid >= eq)
+
+flat = strategy.position_size == 0
 
 // ---------- Largos ----------
 if isLong and inWin and not traded and flat
-    if not swept and sellSideHit
-        swept    := true
-        sweepExt := low
-        if showSetup
-            label.new(bar_index, low, "Barrido", style = label.style_label_up, color = color.new(color.orange, 20), textcolor = color.white, size = size.tiny)
-    else if swept and not bos
+    if not swept
+        if sellSideHit
+            swept    := true
+            sweepExt := low
+            nSweep   += 1
+            if showSetup
+                label.new(bar_index, low, "Barrido", style = label.style_label_up, color = color.new(color.orange, 20), textcolor = color.white, size = size.tiny)
+    else if not bos
         sweepExt := math.min(sweepExt, low)
         if not na(lastSH) and close > lastSH
             bos    := true
+            bosBar := bar_index
             bosExt := high
-            for i = 0 to fvgLookback
-                if low[i] > high[i + 2] and low[i] - high[i + 2] >= minFvgPts
-                    top = low[i]
-                    bot = high[i + 2]
-                    eq  = sweepExt + fibLevel * (bosExt - sweepExt)
-                    if not useFib or (top + bot) / 2 <= eq
-                        fvgTop  := top
-                        fvgBot  := bot
-                        stopLvl := low[i + 2] - stopPad
-                        if showSetup
-                            box.new(bar_index - i - 2, top, bar_index + 20, bot, border_color = color.new(color.green, 40), bgcolor = color.new(color.green, 85))
-                    break
+            nBos   += 1
             if showSetup
                 label.new(bar_index, high, "BOS", style = label.style_label_down, color = color.new(color.green, 30), textcolor = color.white, size = size.tiny)
-    else if bos and not na(fvgTop)
+            // FVG más reciente del impulso que pase los filtros
+            for i = 0 to fvgLookback
+                if bullFvgOk(i)
+                    fvgTop  := low[i]
+                    fvgBot  := high[i + 2]
+                    stopLvl := low[i + 2] - stopPad
+                    break
+            if not na(fvgTop)
+                nFvg += 1
+    else if na(fvgTop)
+        // Tras el BOS el impulso puede seguir y dejar el FVG unas velas después
+        bosExt := math.max(bosExt, high)
+        if bar_index - bosBar <= fvgAfter and bullFvgOk(0)
+            fvgTop  := low
+            fvgBot  := high[2]
+            stopLvl := low[2] - stopPad
+            nFvg    += 1
+    else
         if close < stopLvl
             fvgTop := na
-        else if low <= fvgTop and close >= fvgBot and (not useReaction or close > open)
-            tgt  = nearestAbove(close)
-            risk = close - stopLvl
-            if not na(tgt) and risk > 0 and (tgt - close) / risk >= minRR
-                q = qtyFor(risk)
-                if q > 0
-                    longSig   := true
-                    traded    := true
-                    tradeStop := stopLvl
-                    tradeTgt  := tgt
-                    strategy.entry("Largo", strategy.long, qty = q, comment = "Entrada")
-                    strategy.exit("Salida L", from_entry = "Largo", stop = tradeStop, limit = tradeTgt, comment_loss = "Stop", comment_profit = "Objetivo")
+        else if low <= fvgTop and close >= fvgBot
+            if not dTouch
+                dTouch := true
+                nTouch += 1
+            if not useReaction or close > open
+                tgt  = nearestAbove(close)
+                risk = close - stopLvl
+                if not na(tgt) and risk > 0 and (tgt - close) / risk >= minRR
+                    q = qtyFor(risk)
+                    if q > 0
+                        traded    := true
+                        tradeStop := stopLvl
+                        tradeTgt  := tgt
+                        nTrade    += 1
+                        strategy.entry("Largo", strategy.long, qty = q, comment = "Entrada")
+                        strategy.exit("Salida L", from_entry = "Largo", stop = tradeStop, limit = tradeTgt, comment_loss = "Stop", comment_profit = "Objetivo")
+                else if not dRRno
+                    dRRno := true
+                    nRRno += 1
 
 // ---------- Cortos (espejo) ----------
 if isShort and inWin and not traded and flat
-    if not swept and buySideHit
-        swept    := true
-        sweepExt := high
-        if showSetup
-            label.new(bar_index, high, "Barrido", style = label.style_label_down, color = color.new(color.orange, 20), textcolor = color.white, size = size.tiny)
-    else if swept and not bos
+    if not swept
+        if buySideHit
+            swept    := true
+            sweepExt := high
+            nSweep   += 1
+            if showSetup
+                label.new(bar_index, high, "Barrido", style = label.style_label_down, color = color.new(color.orange, 20), textcolor = color.white, size = size.tiny)
+    else if not bos
         sweepExt := math.max(sweepExt, high)
         if not na(lastSL) and close < lastSL
             bos    := true
+            bosBar := bar_index
             bosExt := low
-            for i = 0 to fvgLookback
-                if high[i] < low[i + 2] and low[i + 2] - high[i] >= minFvgPts
-                    top = low[i + 2]
-                    bot = high[i]
-                    eq  = sweepExt - fibLevel * (sweepExt - bosExt)
-                    if not useFib or (top + bot) / 2 >= eq
-                        fvgTop  := top
-                        fvgBot  := bot
-                        stopLvl := high[i + 2] + stopPad
-                        if showSetup
-                            box.new(bar_index - i - 2, top, bar_index + 20, bot, border_color = color.new(color.red, 40), bgcolor = color.new(color.red, 85))
-                    break
+            nBos   += 1
             if showSetup
                 label.new(bar_index, low, "BOS", style = label.style_label_up, color = color.new(color.red, 30), textcolor = color.white, size = size.tiny)
-    else if bos and not na(fvgTop)
+            for i = 0 to fvgLookback
+                if bearFvgOk(i)
+                    fvgTop  := low[i + 2]
+                    fvgBot  := high[i]
+                    stopLvl := high[i + 2] + stopPad
+                    break
+            if not na(fvgTop)
+                nFvg += 1
+    else if na(fvgTop)
+        bosExt := math.min(bosExt, low)
+        if bar_index - bosBar <= fvgAfter and bearFvgOk(0)
+            fvgTop  := low[2]
+            fvgBot  := high
+            stopLvl := high[2] + stopPad
+            nFvg    += 1
+    else
         if close > stopLvl
             fvgTop := na
-        else if high >= fvgBot and close <= fvgTop and (not useReaction or close < open)
-            tgt  = nearestBelow(close)
-            risk = stopLvl - close
-            if not na(tgt) and risk > 0 and (close - tgt) / risk >= minRR
-                q = qtyFor(risk)
-                if q > 0
-                    shortSig  := true
-                    traded    := true
-                    tradeStop := stopLvl
-                    tradeTgt  := tgt
-                    strategy.entry("Corto", strategy.short, qty = q, comment = "Entrada")
-                    strategy.exit("Salida C", from_entry = "Corto", stop = tradeStop, limit = tradeTgt, comment_loss = "Stop", comment_profit = "Objetivo")
+        else if high >= fvgBot and close <= fvgTop
+            if not dTouch
+                dTouch := true
+                nTouch += 1
+            if not useReaction or close < open
+                tgt  = nearestBelow(close)
+                risk = stopLvl - close
+                if not na(tgt) and risk > 0 and (close - tgt) / risk >= minRR
+                    q = qtyFor(risk)
+                    if q > 0
+                        traded    := true
+                        tradeStop := stopLvl
+                        tradeTgt  := tgt
+                        nTrade    += 1
+                        strategy.entry("Corto", strategy.short, qty = q, comment = "Entrada")
+                        strategy.exit("Salida C", from_entry = "Corto", stop = tradeStop, limit = tradeTgt, comment_loss = "Stop", comment_profit = "Objetivo")
+                else if not dRRno
+                    dRRno := true
+                    nRRno += 1
 
 // ---------- Cierre forzado por hora ----------
 if inExit and strategy.position_size != 0
     strategy.close_all(comment = "Hora")
 
 // ---------- Vista: solo lo que importa ----------
-inTrade = strategy.position_size != 0 or longSig or shortSig
-plot(inTrade ? tradeStop : na, "Stop del trade", color.red, 2, plot.style_linebr)
-plot(inTrade ? tradeTgt : na, "Objetivo del trade", color.green, 2, plot.style_linebr)
-plot(inTrade ? strategy.position_avg_price : na, "Precio de entrada", color.gray, 1, plot.style_linebr)
+plot(strategy.position_size != 0 ? tradeStop : na, "Stop del trade", color.red, 2, plot.style_linebr)
+plot(strategy.position_size != 0 ? tradeTgt : na, "Objetivo del trade", color.green, 2, plot.style_linebr)
+plot(strategy.position_size != 0 ? strategy.position_avg_price : na, "Precio de entrada", color.gray, 1, plot.style_linebr)
 
 plot(showLevels ? asiaH : na, "Máximo Asia", color.new(color.blue, 40), style = plot.style_linebr)
 plot(showLevels ? asiaL : na, "Mínimo Asia", color.new(color.blue, 40), style = plot.style_linebr)
@@ -237,4 +295,25 @@ plot(showLevels and lonDone ? lonH : na, "Máximo Londres", color.new(color.purp
 plot(showLevels and lonDone ? lonL : na, "Mínimo Londres", color.new(color.purple, 40), style = plot.style_linebr)
 plot(showLevels ? pdh : na, "Máximo día anterior", color.new(color.gray, 30), style = plot.style_stepline)
 plot(showLevels ? pdl : na, "Mínimo día anterior", color.new(color.gray, 30), style = plot.style_stepline)
-bgcolor(inWin ? color.new(color.yellow, 94) : na, title = "Ventana de entrada")
+bgcolor(inWin ? color.new(color.yellow, 92) : na, title = "Ventana de entrada")
+
+// ---------- Tabla Embudo ----------
+var table funnel = table.new(position.top_right, 2, 9, bgcolor = color.new(color.black, 20), border_width = 1)
+if showFunnel and barstate.islast
+    table.cell(funnel, 0, 0, "Embudo", text_color = color.white, text_size = size.small)
+    table.cell(funnel, 1, 0, "Días", text_color = color.white, text_size = size.small)
+    table.cell(funnel, 0, 1, "Días con ventana y bias", text_color = color.white, text_size = size.small)
+    table.cell(funnel, 1, 1, str.tostring(nDays), text_color = color.white, text_size = size.small)
+    table.cell(funnel, 0, 2, "1. Barrido de liquidez", text_color = color.white, text_size = size.small)
+    table.cell(funnel, 1, 2, str.tostring(nSweep), text_color = color.white, text_size = size.small)
+    table.cell(funnel, 0, 3, "2. BOS tras el barrido", text_color = color.white, text_size = size.small)
+    table.cell(funnel, 1, 3, str.tostring(nBos), text_color = color.white, text_size = size.small)
+    table.cell(funnel, 0, 4, "3. FVG válido", text_color = color.white, text_size = size.small)
+    table.cell(funnel, 1, 4, str.tostring(nFvg), text_color = color.white, text_size = size.small)
+    table.cell(funnel, 0, 5, "4. Precio vuelve al FVG", text_color = color.white, text_size = size.small)
+    table.cell(funnel, 1, 5, str.tostring(nTouch), text_color = color.white, text_size = size.small)
+    table.cell(funnel, 0, 6, "   (objetivo < R mínima)", text_color = color.gray, text_size = size.small)
+    table.cell(funnel, 1, 6, str.tostring(nRRno), text_color = color.gray, text_size = size.small)
+    table.cell(funnel, 0, 7, "5. Trades", text_color = color.white, text_size = size.small)
+    table.cell(funnel, 1, 7, str.tostring(nTrade), text_color = color.white, text_size = size.small)
+    table.cell(funnel, 0, 8, syminfo.tickerid + " · " + timeframe.period, text_color = color.gray, text_size = size.tiny)
