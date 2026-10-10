@@ -16,7 +16,27 @@ tz = "America/New_York"
 
 // ---------- Ventana y bias ----------
 sess    = input.session("0945-1200", "Ventana (hora Nueva York)", group = "Ventana y bias")
-biasIn  = input.string("LONG", "Bias", options = ["LONG", "SHORT", "OFF", "ORACULO"], group = "Ventana y bias", tooltip = "ORACULO usa la dirección real del día. LONG o SHORT fijos aplican ese bias a TODOS los días del historial.")
+biasIn  = input.string("POR DÍA", "Bias", options = ["POR DÍA", "LONG", "SHORT", "OFF", "ORACULO"], group = "Ventana y bias", tooltip = "POR DÍA usa la tabla de abajo: un bias para cada uno de 10 días (los días que no estén en la lista no operan). ORACULO usa la dirección real del día. LONG o SHORT fijos aplican ese bias a TODOS los días del historial.")
+dt1 = input.time(timestamp("America/New_York", 2026, 9, 28, 0, 0), "Día 1", group = "Bias por día", inline = "d1")
+bd1 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d1")
+dt2 = input.time(timestamp("America/New_York", 2026, 9, 29, 0, 0), "Día 2", group = "Bias por día", inline = "d2")
+bd2 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d2")
+dt3 = input.time(timestamp("America/New_York", 2026, 9, 30, 0, 0), "Día 3", group = "Bias por día", inline = "d3")
+bd3 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d3")
+dt4 = input.time(timestamp("America/New_York", 2026, 10, 1, 0, 0), "Día 4", group = "Bias por día", inline = "d4")
+bd4 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d4")
+dt5 = input.time(timestamp("America/New_York", 2026, 10, 2, 0, 0), "Día 5", group = "Bias por día", inline = "d5")
+bd5 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d5")
+dt6 = input.time(timestamp("America/New_York", 2026, 10, 5, 0, 0), "Día 6", group = "Bias por día", inline = "d6")
+bd6 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d6")
+dt7 = input.time(timestamp("America/New_York", 2026, 10, 6, 0, 0), "Día 7", group = "Bias por día", inline = "d7")
+bd7 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d7")
+dt8 = input.time(timestamp("America/New_York", 2026, 10, 7, 0, 0), "Día 8", group = "Bias por día", inline = "d8")
+bd8 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d8")
+dt9 = input.time(timestamp("America/New_York", 2026, 10, 8, 0, 0), "Día 9", group = "Bias por día", inline = "d9")
+bd9 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d9")
+dt10 = input.time(timestamp("America/New_York", 2026, 10, 9, 0, 0), "Día 10", group = "Bias por día", inline = "d10")
+bd10 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d10")
 eodSess = input.session("1550-1600", "Cierre forzado del día", group = "Ventana y bias")
 
 // ---------- Filtros ----------
@@ -37,7 +57,13 @@ qty     = input.float(1.0, "Contratos por entrada", minval = 0.01, group = "Sali
 // ---------- Dirección ----------
 [dO, dC] = request.security(syminfo.tickerid, "D", [open, close], lookahead = barmerge.lookahead_on)
 dayDir = dC > dO ? 1 : dC < dO ? -1 : 0
-dir = biasIn == "LONG" ? 1 : biasIn == "SHORT" ? -1 : biasIn == "ORACULO" ? dayDir : 0
+dayKey(int t) =>
+    year(t, "America/New_York") * 10000 + month(t, "America/New_York") * 100 + dayofmonth(t, "America/New_York")
+bdir(string b) =>
+    b == "LONG" ? 1 : b == "SHORT" ? -1 : 0
+k = dayKey(time)
+perDay = k == dayKey(dt1) ? bdir(bd1) : k == dayKey(dt2) ? bdir(bd2) : k == dayKey(dt3) ? bdir(bd3) : k == dayKey(dt4) ? bdir(bd4) : k == dayKey(dt5) ? bdir(bd5) : k == dayKey(dt6) ? bdir(bd6) : k == dayKey(dt7) ? bdir(bd7) : k == dayKey(dt8) ? bdir(bd8) : k == dayKey(dt9) ? bdir(bd9) : k == dayKey(dt10) ? bdir(bd10) : 0
+dir = biasIn == "POR DÍA" ? perDay : biasIn == "LONG" ? 1 : biasIn == "SHORT" ? -1 : biasIn == "ORACULO" ? dayDir : 0
 
 inWin    = not na(time(timeframe.period, sess, tz))
 winStart = inWin and not inWin[1]
@@ -80,7 +106,7 @@ var bool  lastHit  = true
 if winStart
     fvgs.clear()
     dE      := 0
-    days    += 1
+    days    += dir != 0 ? 1 : 0
     lastBar := na
     lastHit := true
 
