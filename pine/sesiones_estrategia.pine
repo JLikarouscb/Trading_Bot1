@@ -1,0 +1,240 @@
+// Entradas por ventana horaria con bias dado por el trader
+// Cada ventana tiene su propio bias: LONG, SHORT, OFF u ORACULO (dirección real del día, solo para pruebas).
+// Dentro de una ventana activa, y solo en la dirección del bias:
+//   1. Ruptura de estructura a favor (cierre por encima del último swing alto en largos)
+//   2. FVG a favor formado dentro de la ventana
+//   3. El precio regresa al FVG sin cerrar por debajo -> entrada
+//   4. Stop bajo la vela 1 del FVG; objetivo en R fija o en el máximo reciente
+// Máximo 1 trade por ventana; nunca dos posiciones a la vez.
+// Ideas de estructura y ciclo de vida del FVG inspiradas en "ICT Silver Bullet [LuxAlgo]"; código propio.
+// Resultados BRUTOS (sin spread). Margen del motor 0.5 % para que no se rechacen órdenes;
+// el apalancamiento real se limita con "Apalancamiento máximo".
+
+//@version=6
+strategy("Sesiones: entradas por horario", overlay = true, initial_capital = 10000, currency = currency.USD, margin_long = 0.5, margin_short = 0.5, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
+
+tz = "America/New_York"
+
+// ---------- Ventanas y bias ----------
+s1 = input.session("0830-0930", "1. Market open", group = "Ventanas (hora Nueva York)", inline = "v1")
+b1 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF", "ORACULO"], group = "Ventanas (hora Nueva York)", inline = "v1")
+s2 = input.session("0945-1015", "2. Reversal / aceleración", group = "Ventanas (hora Nueva York)", inline = "v2")
+b2 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF", "ORACULO"], group = "Ventanas (hora Nueva York)", inline = "v2")
+s3 = input.session("1200-1300", "3. Market break", group = "Ventanas (hora Nueva York)", inline = "v3")
+b3 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF", "ORACULO"], group = "Ventanas (hora Nueva York)", inline = "v3")
+s4 = input.session("1300-1400", "4. Acomodación", group = "Ventanas (hora Nueva York)", inline = "v4")
+b4 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF", "ORACULO"], group = "Ventanas (hora Nueva York)", inline = "v4")
+eodSess = input.session("1550-1600", "Cierre forzado del día", group = "Ventanas (hora Nueva York)")
+closeAtWinEnd = input.bool(false, "Cerrar el trade al terminar su ventana", group = "Ventanas (hora Nueva York)")
+
+// ---------- Setup ----------
+swL         = input.int(5, "Swing: velas a la izquierda", minval = 1, maxval = 20, group = "Setup")
+swR         = input.int(1, "Swing: velas a la derecha (confirmación)", minval = 1, maxval = 5, group = "Setup")
+needStruct  = input.bool(true, "Exigir ruptura de estructura a favor antes del FVG", group = "Setup")
+minFvg      = input.float(0.0, "Tamaño mínimo del FVG (puntos)", minval = 0, group = "Setup")
+useReaction = input.bool(false, "Exigir vela de reacción al tocar el FVG", group = "Setup")
+
+// ---------- Riesgo y salida ----------
+stopPad = input.float(1.0, "Margen del stop (puntos)", minval = 0, group = "Riesgo")
+tgtMode = input.string("R fija", "Objetivo", options = ["R fija", "Máximo/mínimo reciente"], group = "Riesgo")
+tgtR    = input.float(2.0, "R del objetivo (o mínimo si es máximo reciente)", minval = 0.5, step = 0.25, group = "Riesgo")
+tgtLook = input.int(60, "Velas para el máximo/mínimo reciente", minval = 5, group = "Riesgo")
+riskPct = input.float(1.0, "Riesgo por trade (% de la cuenta)", minval = 0.1, maxval = 5, group = "Riesgo")
+maxLev  = input.float(20, "Apalancamiento máximo (x)", minval = 1, maxval = 200, group = "Riesgo")
+
+// ---------- Ventana actual y su dirección ----------
+inS(string s) =>
+    not na(time(timeframe.period, s, tz))
+
+[dO, dC] = request.security(syminfo.tickerid, "D", [open, close], lookahead = barmerge.lookahead_on)
+dayDir = dC > dO ? 1 : dC < dO ? -1 : 0
+
+biasDir(string b) =>
+    b == "LONG" ? 1 : b == "SHORT" ? -1 : b == "ORACULO" ? dayDir : 0
+
+win = inS(s1) ? 1 : inS(s2) ? 2 : inS(s3) ? 3 : inS(s4) ? 4 : 0
+dir = win == 1 ? biasDir(b1) : win == 2 ? biasDir(b2) : win == 3 ? biasDir(b3) : win == 4 ? biasDir(b4) : 0
+winStart = win != 0 and win != win[1]
+winEnd   = win[1] != 0 and win != win[1]
+inEod    = inS(eodSess)
+
+// ---------- Estructura (swings confirmados) ----------
+ph = ta.pivothigh(high, swL, swR)
+pl = ta.pivotlow(low, swL, swR)
+var float lastSH = na
+var float lastSL = na
+if not na(ph)
+    lastSH := ph
+if not na(pl)
+    lastSL := pl
+
+// ---------- Estado del setup de la ventana ----------
+var bool  structOk = false
+var float fTop     = na
+var float fBot     = na
+var float fStop    = na
+var int   fBar     = na
+var box   fBox     = na
+var bool  tradedW  = false
+var float tStop    = na
+var float tTgt     = na
+
+if winStart or winEnd
+    structOk := false
+    fTop     := na
+    tradedW  := false
+
+// Estadísticas por ventana (índice 1..4)
+var float[] nFvg   = array.new_float(5, 0)
+var float[] nTrd   = array.new_float(5, 0)
+var float[] nWin   = array.new_float(5, 0)
+var float[] sumR   = array.new_float(5, 0)
+var int[]   tWin   = array.new_int()
+var float[] tRisk  = array.new_float()
+var int     lastClosed = 0
+
+flat = strategy.position_size == 0
+hh   = ta.highest(high, tgtLook)
+ll   = ta.lowest(low, tgtLook)
+
+if win != 0 and dir != 0 and not tradedW
+    // 1. Ruptura de estructura a favor
+    if dir == 1 and not na(lastSH) and close > lastSH and close[1] <= lastSH
+        structOk := true
+    if dir == -1 and not na(lastSL) and close < lastSL and close[1] >= lastSL
+        structOk := true
+
+    // 3. FVG pendiente: invalidación o entrada
+    if not na(fTop) and bar_index > fBar
+        if dir == 1
+            if close < fBot
+                fTop := na
+            else if low <= fTop and (not useReaction or close > open) and flat and not inEod
+                risk = close - fStop
+                if risk > 0
+                    tgtFix = close + tgtR * risk
+                    tgt    = tgtMode == "R fija" ? tgtFix : math.max(hh, tgtFix)
+                    qRisk  = strategy.equity * riskPct / 100 / (risk * syminfo.pointvalue)
+                    qLev   = strategy.equity * maxLev / (close * syminfo.pointvalue)
+                    q      = math.floor(math.min(qRisk, qLev) * 100) / 100
+                    if q > 0
+                        id = "L" + str.tostring(win)
+                        strategy.entry(id, strategy.long, qty = q, comment = "V" + str.tostring(win) + " largo")
+                        strategy.exit("X" + id, from_entry = id, stop = fStop, limit = tgt, comment_loss = "Stop", comment_profit = "Objetivo")
+                        tWin.push(win)
+                        tRisk.push(risk)
+                        tStop   := fStop
+                        tTgt    := tgt
+                        tradedW := true
+                        fTop    := na
+        else
+            if close > fTop
+                fTop := na
+            else if high >= fBot and (not useReaction or close < open) and flat and not inEod
+                risk = fStop - close
+                if risk > 0
+                    tgtFix = close - tgtR * risk
+                    tgt    = tgtMode == "R fija" ? tgtFix : math.min(ll, tgtFix)
+                    qRisk  = strategy.equity * riskPct / 100 / (risk * syminfo.pointvalue)
+                    qLev   = strategy.equity * maxLev / (close * syminfo.pointvalue)
+                    q      = math.floor(math.min(qRisk, qLev) * 100) / 100
+                    if q > 0
+                        id = "S" + str.tostring(win)
+                        strategy.entry(id, strategy.short, qty = q, comment = "V" + str.tostring(win) + " corto")
+                        strategy.exit("X" + id, from_entry = id, stop = fStop, limit = tgt, comment_loss = "Stop", comment_profit = "Objetivo")
+                        tWin.push(win)
+                        tRisk.push(risk)
+                        tStop   := fStop
+                        tTgt    := tgt
+                        tradedW := true
+                        fTop    := na
+
+    // 2. Nuevo FVG a favor dentro de la ventana (reemplaza al pendiente)
+    if not tradedW and (not needStruct or structOk)
+        if dir == 1 and low > high[2] and low - high[2] >= minFvg
+            fTop  := low
+            fBot  := high[2]
+            fStop := low[2] - stopPad
+            fBar  := bar_index
+            nFvg.set(win, nFvg.get(win) + 1)
+            fBox  := box.new(bar_index - 2, fTop, bar_index, fBot, border_color = color.new(color.teal, 40), bgcolor = color.new(color.teal, 80))
+        if dir == -1 and high < low[2] and low[2] - high >= minFvg
+            fTop  := low[2]
+            fBot  := high
+            fStop := high[2] + stopPad
+            fBar  := bar_index
+            nFvg.set(win, nFvg.get(win) + 1)
+            fBox  := box.new(bar_index - 2, fTop, bar_index, fBot, border_color = color.new(color.orange, 40), bgcolor = color.new(color.orange, 80))
+
+if not na(fTop) and not na(fBox)
+    box.set_right(fBox, bar_index)
+
+// ---------- Salidas por tiempo ----------
+if closeAtWinEnd and winEnd and strategy.position_size != 0
+    strategy.close_all(comment = "Fin ventana")
+if inEod and strategy.position_size != 0
+    strategy.close_all(comment = "Fin del día")
+
+// ---------- R por trade cerrado ----------
+if strategy.closedtrades > lastClosed
+    for i = lastClosed to strategy.closedtrades - 1
+        if i < tWin.size()
+            w  = tWin.get(i)
+            ep = strategy.closedtrades.entry_price(i)
+            xp = strategy.closedtrades.exit_price(i)
+            r  = (xp - ep) * math.sign(strategy.closedtrades.size(i)) / tRisk.get(i)
+            nTrd.set(w, nTrd.get(w) + 1)
+            sumR.set(w, sumR.get(w) + r)
+            if r > 0
+                nWin.set(w, nWin.get(w) + 1)
+    lastClosed := strategy.closedtrades
+
+// ---------- Vista ----------
+bgcolor(win == 1 ? color.new(color.blue, 90) : win == 2 ? color.new(color.purple, 90) : win == 3 ? color.new(color.gray, 88) : win == 4 ? color.new(color.olive, 90) : na, title = "Ventanas")
+inPos = strategy.position_size != 0
+plot(inPos ? tStop : na, "Stop", color.red, 2, plot.style_linebr)
+plot(inPos ? tTgt : na, "Objetivo", color.green, 2, plot.style_linebr)
+plot(inPos ? strategy.position_avg_price : na, "Entrada", color.gray, 1, plot.style_linebr)
+
+// ---------- Tabla por ventana ----------
+biasTxt(string b) =>
+    b == "ORACULO" ? "ORÁCULO" : b
+
+var table tb = table.new(position.top_right, 7, 6, bgcolor = color.new(color.black, 20), border_width = 1)
+cell(int c, int r, string t, color col = color.white) =>
+    table.cell(tb, c, r, t, text_color = col, text_size = size.small)
+
+if barstate.islast
+    cell(0, 0, "Ventana")
+    cell(1, 0, "Bias")
+    cell(2, 0, "FVG")
+    cell(3, 0, "Trades")
+    cell(4, 0, "% acierto")
+    cell(5, 0, "R total")
+    cell(6, 0, "R prom.")
+    totF = 0.0
+    totT = 0.0
+    totW = 0.0
+    totR = 0.0
+    for w = 1 to 4
+        nm = w == 1 ? "1. Market open" : w == 2 ? "2. Reversal" : w == 3 ? "3. Break" : "4. Acomodación"
+        bs = w == 1 ? b1 : w == 2 ? b2 : w == 3 ? b3 : b4
+        t  = nTrd.get(w)
+        cell(0, w, nm)
+        cell(1, w, biasTxt(bs), bs == "OFF" ? color.gray : color.white)
+        cell(2, w, str.tostring(nFvg.get(w), "#"))
+        cell(3, w, str.tostring(t, "#"))
+        cell(4, w, t > 0 ? str.tostring(100 * nWin.get(w) / t, "#") + " %" : "-")
+        cell(5, w, str.tostring(sumR.get(w), "#.#"), sumR.get(w) >= 0 ? color.lime : color.red)
+        cell(6, w, t > 0 ? str.tostring(sumR.get(w) / t, "#.##") : "-")
+        totF += nFvg.get(w)
+        totT += t
+        totW += nWin.get(w)
+        totR += sumR.get(w)
+    cell(0, 5, "Total", color.yellow)
+    cell(1, 5, syminfo.ticker + " " + timeframe.period, color.gray)
+    cell(2, 5, str.tostring(totF, "#"), color.yellow)
+    cell(3, 5, str.tostring(totT, "#"), color.yellow)
+    cell(4, 5, totT > 0 ? str.tostring(100 * totW / totT, "#") + " %" : "-", color.yellow)
+    cell(5, 5, str.tostring(totR, "#.#"), color.yellow)
+    cell(6, 5, totT > 0 ? str.tostring(totR / totT, "#.##") : "-", color.yellow)
