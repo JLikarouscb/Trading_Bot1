@@ -1,0 +1,242 @@
+// VERSIÓN 01
+// Entradas FVG por ventana como ESTRATEGIA, con filtros y comparación de varios RR a la vez.
+// Detección y activación del FVG como en "ICT Silver Bullet [LuxAlgo]" (código propio, CC BY-NC-SA 4.0 en el original):
+//   FVG alcista = low > high[2];  entrada cuando low < techo y close > piso (espejo para bajistas)
+// Filtros:
+//   1. Vela de entrada en el sentido del bias
+//   2. Nueva entrada solo si la anterior ya llegó a X R o pasaron N velas
+//   3. Riesgo mínimo / máximo en puntos y tamaño mínimo del FVG
+// La tabla simula CADA entrada con objetivos de 1, 1.5, 2, 2.5 y 3 R a la vez (mismo stop).
+// Si stop y objetivo caen en la misma vela, cuenta como stop (criterio conservador).
+// Resultados BRUTOS: sin spread ni deslizamiento.
+
+//@version=6
+strategy("FVG v01: base", overlay = true, initial_capital = 10000, currency = currency.USD, pyramiding = 20, margin_long = 0.5, margin_short = 0.5, max_boxes_count = 500, max_labels_count = 500)
+
+tz = "America/New_York"
+
+// ---------- Ventana y bias ----------
+sess    = input.session("0945-1200", "Ventana (hora Nueva York)", group = "Ventana y bias")
+biasIn  = input.string("POR DÍA", "Bias", options = ["POR DÍA", "LONG", "SHORT", "OFF", "ORACULO"], group = "Ventana y bias", tooltip = "POR DÍA usa la tabla de abajo: un bias para cada uno de 10 días (los días que no estén en la lista no operan). ORACULO usa la dirección real del día. LONG o SHORT fijos aplican ese bias a TODOS los días del historial.")
+dt1 = input.time(timestamp("2026-09-28T12:00:00-04:00"), "Día 1", group = "Bias por día", inline = "d1")
+bd1 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d1")
+dt2 = input.time(timestamp("2026-09-29T12:00:00-04:00"), "Día 2", group = "Bias por día", inline = "d2")
+bd2 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d2")
+dt3 = input.time(timestamp("2026-09-30T12:00:00-04:00"), "Día 3", group = "Bias por día", inline = "d3")
+bd3 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d3")
+dt4 = input.time(timestamp("2026-10-01T12:00:00-04:00"), "Día 4", group = "Bias por día", inline = "d4")
+bd4 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d4")
+dt5 = input.time(timestamp("2026-10-02T12:00:00-04:00"), "Día 5", group = "Bias por día", inline = "d5")
+bd5 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d5")
+dt6 = input.time(timestamp("2026-10-05T12:00:00-04:00"), "Día 6", group = "Bias por día", inline = "d6")
+bd6 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d6")
+dt7 = input.time(timestamp("2026-10-06T12:00:00-04:00"), "Día 7", group = "Bias por día", inline = "d7")
+bd7 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d7")
+dt8 = input.time(timestamp("2026-10-07T12:00:00-04:00"), "Día 8", group = "Bias por día", inline = "d8")
+bd8 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d8")
+dt9 = input.time(timestamp("2026-10-08T12:00:00-04:00"), "Día 9", group = "Bias por día", inline = "d9")
+bd9 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d9")
+dt10 = input.time(timestamp("2026-10-09T12:00:00-04:00"), "Día 10", group = "Bias por día", inline = "d10")
+bd10 = input.string("OFF", "", options = ["LONG", "SHORT", "OFF"], group = "Bias por día", inline = "d10")
+eodSess = input.session("1550-1600", "Cierre forzado del día", group = "Ventana y bias")
+
+// ---------- Filtros ----------
+sameCandle = input.bool(true, "1. Vela de entrada en el sentido del bias", group = "Filtros")
+rrUnlock   = input.float(1.0, "2. Nueva entrada si la anterior llegó a (R)", minval = 0.25, step = 0.25, group = "Filtros", inline = "re")
+minBars    = input.int(5, "o pasaron (velas)", minval = 1, group = "Filtros", inline = "re")
+modo       = input.string("Cada regreso al FVG", "Entradas por FVG", options = ["Cada regreso al FVG", "Solo el primer regreso"], group = "Filtros")
+minFvg     = input.float(0.0, "Tamaño mínimo del FVG (puntos)", minval = 0, group = "Filtros")
+minRisk    = input.float(0.0, "Riesgo mínimo (puntos)", minval = 0, group = "Filtros", tooltip = "Stops muy cortos quedan dominados por el spread.")
+maxRisk    = input.float(0.0, "Riesgo máximo (puntos, 0 = sin límite)", minval = 0, group = "Filtros")
+invMode    = input.string("Cierre fuera del FVG", "El FVG deja de valer cuando", options = ["Cierre fuera del FVG", "Cierre más allá de la mitad", "Nunca dentro de la ventana"], group = "Filtros")
+
+// ---------- Salida ----------
+stopPad = input.float(1.0, "Margen del stop bajo la vela 1 del FVG (puntos)", minval = 0, group = "Salida")
+tgtR    = input.float(2.0, "R del objetivo de los trades reales", minval = 0.5, step = 0.5, group = "Salida")
+qty     = input.float(1.0, "Contratos por entrada", minval = 0.01, group = "Salida")
+
+// ---------- Dirección ----------
+[dO, dC] = request.security(syminfo.tickerid, "D", [open, close], lookahead = barmerge.lookahead_on)
+dayDir = dC > dO ? 1 : dC < dO ? -1 : 0
+dayKey(int t) =>
+    year(t, "America/New_York") * 10000 + month(t, "America/New_York") * 100 + dayofmonth(t, "America/New_York")
+bdir(string b) =>
+    b == "LONG" ? 1 : b == "SHORT" ? -1 : 0
+k = dayKey(time)
+perDay = k == dayKey(dt1) ? bdir(bd1) : k == dayKey(dt2) ? bdir(bd2) : k == dayKey(dt3) ? bdir(bd3) : k == dayKey(dt4) ? bdir(bd4) : k == dayKey(dt5) ? bdir(bd5) : k == dayKey(dt6) ? bdir(bd6) : k == dayKey(dt7) ? bdir(bd7) : k == dayKey(dt8) ? bdir(bd8) : k == dayKey(dt9) ? bdir(bd9) : k == dayKey(dt10) ? bdir(bd10) : 0
+dir = biasIn == "POR DÍA" ? perDay : biasIn == "LONG" ? 1 : biasIn == "SHORT" ? -1 : biasIn == "ORACULO" ? dayDir : 0
+
+inWin    = not na(time(timeframe.period, sess, tz))
+winStart = inWin and not inWin[1]
+winEnd   = not inWin and inWin[1]
+inEod    = not na(time(timeframe.period, eodSess, tz))
+
+// ---------- Tipos ----------
+type Fvg
+    int   d
+    float top
+    float bot
+    float stop
+    bool  armed
+    box   bx
+
+type Vt
+    int     d
+    float   entry
+    float   stop
+    float   risk
+    int[]   st
+
+var Fvg[] fvgs = array.new<Fvg>()
+var Vt[]  vts  = array.new<Vt>()
+var float[] rrs = array.from(1.0, 1.5, 2.0, 2.5, 3.0)
+var int[]   cW  = array.new_int(5, 0)
+var int[]   cL  = array.new_int(5, 0)
+var int[]   cT  = array.new_int(5, 0)
+var float[] sR  = array.new_float(5, 0)
+
+var int   nEntries = 0
+var int   dE       = 0
+var int   days     = 0
+var int   lastBar  = na
+var float lastPx   = na
+var float lastRisk = na
+var int   lastDir  = 0
+var bool  lastHit  = true
+
+if winStart
+    fvgs.clear()
+    dE      := 0
+    days    += dir != 0 ? 1 : 0
+    lastBar := na
+    lastHit := true
+
+// ---------- 1. Simulación de los trades abiertos (velas posteriores a su entrada) ----------
+if vts.size() > 0
+    for i = vts.size() - 1 to 0
+        v = vts.get(i)
+        stopHit = v.d == 1 ? low <= v.stop : high >= v.stop
+        openLeft = 0
+        for k = 0 to 4
+            if v.st.get(k) == 0
+                rr = rrs.get(k)
+                tgtHit = v.d == 1 ? high >= v.entry + rr * v.risk : low <= v.entry - rr * v.risk
+                if stopHit
+                    v.st.set(k, -1)
+                    cL.set(k, cL.get(k) + 1)
+                    sR.set(k, sR.get(k) - 1)
+                else if tgtHit
+                    v.st.set(k, 1)
+                    cW.set(k, cW.get(k) + 1)
+                    sR.set(k, sR.get(k) + rr)
+                else if inEod
+                    r = (close - v.entry) * v.d / v.risk
+                    v.st.set(k, 2)
+                    cT.set(k, cT.get(k) + 1)
+                    sR.set(k, sR.get(k) + r)
+                else
+                    openLeft += 1
+        if openLeft == 0
+            vts.remove(i)
+
+// Desbloqueo de nueva entrada: la anterior llegó a rrUnlock R
+if not lastHit and not na(lastBar)
+    if lastDir == 1 ? high >= lastPx + rrUnlock * lastRisk : low <= lastPx - rrUnlock * lastRisk
+        lastHit := true
+
+canEnter = na(lastBar) or lastHit or bar_index - lastBar >= minBars
+
+// ---------- 2. Regresos a FVG existentes ----------
+Fvg   pick  = na
+float pRisk = na
+if inWin and dir != 0 and fvgs.size() > 0
+    for i = fvgs.size() - 1 to 0
+        f = fvgs.get(i)
+        if f.d != dir
+            fvgs.remove(i)
+            continue
+        lvl = invMode == "Cierre fuera del FVG" ? (f.d == 1 ? f.bot : f.top) : invMode == "Cierre más allá de la mitad" ? (f.top + f.bot) / 2 : na
+        dead = not na(lvl) and (f.d == 1 ? close < lvl : close > lvl)
+        if dead
+            f.bx.set_right(bar_index)
+            f.bx.set_bgcolor(color.new(color.gray, 88))
+            fvgs.remove(i)
+            continue
+        f.bx.set_right(bar_index)
+        touch = f.d == 1 ? low < f.top and close > f.bot : high > f.bot and close < f.top
+        if f.armed and touch
+            candleOk = not sameCandle or (f.d == 1 ? close > open : close < open)
+            risk     = f.d == 1 ? close - f.stop : f.stop - close
+            riskOk   = risk > 0 and risk >= minRisk and (maxRisk == 0 or risk <= maxRisk)
+            if candleOk and riskOk and canEnter
+                // Si varios FVG se tocan en la misma vela, se usa el de stop más cercano
+                if na(pick) or risk < pRisk
+                    pick  := f
+                    pRisk := risk
+        else if not f.armed and modo == "Cada regreso al FVG" and (f.d == 1 ? low > f.top : high < f.bot)
+            f.armed := true
+
+// ---------- 3. Entrada ----------
+if not na(pick) and not inEod
+    pick.armed := false
+    nEntries += 1
+    dE       += 1
+    id = "E" + str.tostring(nEntries)
+    strategy.entry(id, dir == 1 ? strategy.long : strategy.short, qty = qty, comment = "#" + str.tostring(dE))
+    strategy.exit("X" + id, from_entry = id, stop = pick.stop, limit = close + dir * tgtR * pRisk, comment_loss = "Stop", comment_profit = "Objetivo")
+    vts.push(Vt.new(dir, close, pick.stop, pRisk, array.new_int(5, 0)))
+    lastBar  := bar_index
+    lastPx   := close
+    lastRisk := pRisk
+    lastDir  := dir
+    lastHit  := false
+    label.new(bar_index, dir == 1 ? low : high, str.tostring(dE), style = dir == 1 ? label.style_label_up : label.style_label_down, color = color.blue, textcolor = color.white, size = size.tiny, tooltip = "Entrada " + str.tostring(dE) + "\nRiesgo " + str.tostring(pRisk, "#.#") + " pts")
+
+// ---------- 4. FVG nuevo a favor dentro de la ventana ----------
+if inWin and dir == 1 and low > high[2] and low - high[2] >= minFvg
+    b = box.new(bar_index - 2, low, bar_index, high[2], border_color = color.new(color.blue, 50), bgcolor = color.new(color.blue, 82))
+    fvgs.push(Fvg.new(1, low, high[2], low[2] - stopPad, true, b))
+if inWin and dir == -1 and high < low[2] and low[2] - high >= minFvg
+    b = box.new(bar_index - 2, low[2], bar_index, high, border_color = color.new(color.red, 50), bgcolor = color.new(color.red, 82))
+    fvgs.push(Fvg.new(-1, low[2], high, high[2] + stopPad, true, b))
+if fvgs.size() > 60
+    fvgs.shift()
+
+if winEnd
+    fvgs.clear()
+
+// ---------- Cierre del día ----------
+if inEod and strategy.position_size != 0
+    strategy.close_all(comment = "Fin del día")
+
+bgcolor(inWin ? color.new(color.purple, 92) : na, title = "Ventana")
+
+// ---------- Tabla: mismo set de entradas con distintos RR ----------
+var table tb = table.new(position.top_right, 7, 7, bgcolor = color.new(color.black, 15), border_width = 1)
+cell(int c, int r, string t, color col) =>
+    table.cell(tb, c, r, t, text_color = col, text_size = size.small)
+
+if barstate.islast
+    cell(0, 0, "Objetivo", color.white)
+    cell(1, 0, "Ganan", color.white)
+    cell(2, 0, "Pierden", color.white)
+    cell(3, 0, "Por hora", color.white)
+    cell(4, 0, "% acierto", color.white)
+    cell(5, 0, "R total", color.white)
+    cell(6, 0, "R prom.", color.white)
+    for k = 0 to 4
+        rr  = rrs.get(k)
+        w   = cW.get(k)
+        l   = cL.get(k)
+        t   = cT.get(k)
+        n   = w + l + t
+        sel = rr == tgtR
+        c   = sel ? color.yellow : color.white
+        cell(0, k + 1, str.tostring(rr, "#.#") + " R" + (sel ? " ◀" : ""), c)
+        cell(1, k + 1, str.tostring(w), c)
+        cell(2, k + 1, str.tostring(l), c)
+        cell(3, k + 1, str.tostring(t), c)
+        cell(4, k + 1, n > 0 ? str.tostring(100.0 * w / n, "#") + " %" : "-", c)
+        cell(5, k + 1, str.tostring(sR.get(k), "#.#"), sR.get(k) >= 0 ? color.lime : color.red)
+        cell(6, k + 1, n > 0 ? str.tostring(sR.get(k) / n, "#.##") : "-", c)
+    cell(0, 6, str.tostring(nEntries) + " entradas · " + str.tostring(days) + " días · " + biasIn, color.gray)

@@ -1,4 +1,7 @@
+// VERSIÓN 02 · Entradas FVG + estructura de mercado (cambios respecto a v01 en docs/versiones.md)
 // Entradas FVG por ventana como ESTRATEGIA, con filtros y comparación de varios RR a la vez.
+// Estructura como "ICT Silver Bullet [LuxAlgo]": swings con 5 velas a la izquierda y 1 a la derecha;
+//   BOS = cierre más allá del último swing en la dirección de la tendencia; MSS = cierre que la invierte.
 // Detección y activación del FVG como en "ICT Silver Bullet [LuxAlgo]" (código propio, CC BY-NC-SA 4.0 en el original):
 //   FVG alcista = low > high[2];  entrada cuando low < techo y close > piso (espejo para bajistas)
 // Filtros:
@@ -10,7 +13,7 @@
 // Resultados BRUTOS: sin spread ni deslizamiento.
 
 //@version=6
-strategy("Entradas FVG: estrategia", overlay = true, initial_capital = 10000, currency = currency.USD, pyramiding = 20, margin_long = 0.5, margin_short = 0.5, max_boxes_count = 500, max_labels_count = 500)
+strategy("FVG v02: estructura", overlay = true, initial_capital = 10000, currency = currency.USD, pyramiding = 20, margin_long = 0.5, margin_short = 0.5, max_boxes_count = 500, max_labels_count = 500)
 
 tz = "America/New_York"
 
@@ -49,6 +52,16 @@ minRisk    = input.float(0.0, "Riesgo mínimo (puntos)", minval = 0, group = "Fi
 maxRisk    = input.float(0.0, "Riesgo máximo (puntos, 0 = sin límite)", minval = 0, group = "Filtros")
 invMode    = input.string("Cierre fuera del FVG", "El FVG deja de valer cuando", options = ["Cierre fuera del FVG", "Cierre más allá de la mitad", "Nunca dentro de la ventana"], group = "Filtros")
 
+// ---------- Estructura (v02) ----------
+swL        = input.int(5, "Swing: velas a la izquierda", minval = 1, maxval = 20, group = "Estructura")
+swR        = input.int(1, "Swing: velas a la derecha", minval = 1, maxval = 5, group = "Estructura")
+needTrend  = input.bool(true, "A. Estructura de 1 min a favor del bias", group = "Estructura")
+needLeg    = input.bool(true, "B. FVG del impulso que rompió estructura", group = "Estructura", tooltip = "El FVG debe formarse cerca del BOS/MSS a favor: hasta N velas antes o después de la ruptura.")
+legPre     = input.int(5, "Velas antes de la ruptura", minval = 0, group = "Estructura", inline = "leg")
+legPost    = input.int(5, "después", minval = 0, group = "Estructura", inline = "leg")
+maxDay     = input.int(3, "C. Máximo de entradas por día (0 = sin límite)", minval = 0, group = "Estructura")
+showStruct = input.bool(true, "Dibujar BOS / MSS", group = "Estructura")
+
 // ---------- Salida ----------
 stopPad = input.float(1.0, "Margen del stop bajo la vela 1 del FVG (puntos)", minval = 0, group = "Salida")
 tgtR    = input.float(2.0, "R del objetivo de los trades reales", minval = 0.5, step = 0.5, group = "Salida")
@@ -78,6 +91,8 @@ type Fvg
     float stop
     bool  armed
     box   bx
+    int   bar
+    bool  ok
 
 type Vt
     int     d
@@ -109,6 +124,53 @@ if winStart
     days    += dir != 0 ? 1 : 0
     lastBar := na
     lastHit := true
+
+// ---------- Estructura de mercado ----------
+ph = ta.pivothigh(high, swL, swR)
+pl = ta.pivotlow(low, swL, swR)
+var float sh     = na
+var int   shBar  = na
+var bool  shUsed = true
+var float sl     = na
+var int   slBar  = na
+var bool  slUsed = true
+var int   trend  = 0
+var int   upBar  = na
+var int   dnBar  = na
+if not na(ph)
+    sh     := ph
+    shBar  := bar_index - swR
+    shUsed := false
+if not na(pl)
+    sl     := pl
+    slBar  := bar_index - swR
+    slUsed := false
+
+bullBreak = not shUsed and not na(sh) and close > sh
+bearBreak = not slUsed and not na(sl) and close < sl
+if bullBreak
+    kind = trend == 1 ? "BOS" : "MSS"
+    if showStruct
+        line.new(shBar, sh, bar_index, sh, color = color.teal, width = 1)
+        label.new(int(math.round((shBar + bar_index) / 2)), sh, kind, style = label.style_none, textcolor = color.teal, size = size.tiny)
+    trend  := 1
+    upBar  := bar_index
+    shUsed := true
+if bearBreak
+    kind = trend == -1 ? "BOS" : "MSS"
+    if showStruct
+        line.new(slBar, sl, bar_index, sl, color = color.maroon, width = 1)
+        label.new(int(math.round((slBar + bar_index) / 2)), sl, kind, style = label.style_label_up, color = color.new(color.white, 100), textcolor = color.maroon, size = size.tiny)
+    trend  := -1
+    dnBar  := bar_index
+    slUsed := true
+
+// FVG previos a la ruptura quedan validados (impulso que rompió)
+if (bullBreak or bearBreak) and fvgs.size() > 0
+    for f in fvgs
+        if (bullBreak and f.d == 1) or (bearBreak and f.d == -1)
+            if bar_index - f.bar <= legPre
+                f.ok := true
 
 // ---------- 1. Simulación de los trades abiertos (velas posteriores a su entrada) ----------
 if vts.size() > 0
@@ -143,7 +205,7 @@ if not lastHit and not na(lastBar)
     if lastDir == 1 ? high >= lastPx + rrUnlock * lastRisk : low <= lastPx - rrUnlock * lastRisk
         lastHit := true
 
-canEnter = na(lastBar) or lastHit or bar_index - lastBar >= minBars
+canEnter = (na(lastBar) or lastHit or bar_index - lastBar >= minBars) and (maxDay == 0 or dE < maxDay) and (not needTrend or trend == dir)
 
 // ---------- 2. Regresos a FVG existentes ----------
 Fvg   pick  = na
@@ -167,7 +229,8 @@ if inWin and dir != 0 and fvgs.size() > 0
             candleOk = not sameCandle or (f.d == 1 ? close > open : close < open)
             risk     = f.d == 1 ? close - f.stop : f.stop - close
             riskOk   = risk > 0 and risk >= minRisk and (maxRisk == 0 or risk <= maxRisk)
-            if candleOk and riskOk and canEnter
+            legOk    = not needLeg or f.ok
+            if candleOk and riskOk and canEnter and legOk
                 // Si varios FVG se tocan en la misma vela, se usa el de stop más cercano
                 if na(pick) or risk < pRisk
                     pick  := f
@@ -194,10 +257,12 @@ if not na(pick) and not inEod
 // ---------- 4. FVG nuevo a favor dentro de la ventana ----------
 if inWin and dir == 1 and low > high[2] and low - high[2] >= minFvg
     b = box.new(bar_index - 2, low, bar_index, high[2], border_color = color.new(color.blue, 50), bgcolor = color.new(color.blue, 82))
-    fvgs.push(Fvg.new(1, low, high[2], low[2] - stopPad, true, b))
+    okNow = not na(upBar) and bar_index - upBar <= legPost and trend == 1
+    fvgs.push(Fvg.new(1, low, high[2], low[2] - stopPad, true, b, bar_index, okNow))
 if inWin and dir == -1 and high < low[2] and low[2] - high >= minFvg
     b = box.new(bar_index - 2, low[2], bar_index, high, border_color = color.new(color.red, 50), bgcolor = color.new(color.red, 82))
-    fvgs.push(Fvg.new(-1, low[2], high, high[2] + stopPad, true, b))
+    okNow = not na(dnBar) and bar_index - dnBar <= legPost and trend == -1
+    fvgs.push(Fvg.new(-1, low[2], high, high[2] + stopPad, true, b, bar_index, okNow))
 if fvgs.size() > 60
     fvgs.shift()
 
@@ -238,4 +303,4 @@ if barstate.islast
         cell(4, k + 1, n > 0 ? str.tostring(100.0 * w / n, "#") + " %" : "-", c)
         cell(5, k + 1, str.tostring(sR.get(k), "#.#"), sR.get(k) >= 0 ? color.lime : color.red)
         cell(6, k + 1, n > 0 ? str.tostring(sR.get(k) / n, "#.##") : "-", c)
-    cell(0, 6, str.tostring(nEntries) + " entradas · " + str.tostring(days) + " días · " + biasIn, color.gray)
+    cell(0, 6, "v02 · " + str.tostring(nEntries) + " entradas · " + str.tostring(days) + " días · " + biasIn, color.gray)

@@ -9,7 +9,7 @@ Plan completo y criterios de validación: documento "Plan de arranque: bot de en
 
 | Carpeta | Qué contiene | Estado |
 | --- | --- | --- |
-| `pine/` | `sesiones_estrategia.pine`: entradas por ventana horaria con bias por ventana. `archivo/`: versiones anteriores del Modelo A | En prueba |
+| `pine/` | `versiones/fvg_vNN.pine`: estrategia FVG por versión (historial y resultados en `docs/versiones.md`). `archivo/`: scripts anteriores | v02 en prueba |
 | `docs/` | Reglas de cada modelo, escritas sin ambigüedad | Modelo A (borrador) |
 | `estrategias/` | Reglas en Python, funciones puras usadas igual en backtest y en vivo | Pendiente |
 | `backtest/` | Motor de backtest, control de entradas al azar y oráculo de bias | Pendiente |
