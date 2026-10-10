@@ -5,11 +5,13 @@
 //   "Objetivo" -> tocó la liquidez objetivo
 //   "Hora"     -> cierre forzado a la hora de salida
 // La tabla "Embudo" (arriba a la derecha) cuenta en qué paso se quedan los días sin trade.
+// Margen 5 % (apalancamiento 20:1, como un CFD de índice). Con el margen por defecto de Pine v6 (100 %)
+// la cuenta de 10,000 USD no alcanza para abrir NAS100 y TradingView rechaza todas las órdenes.
 // Resultados BRUTOS (sin spread). El backtest oficial, neto de costos, se hará en Python.
 // Reglas: docs/reglas_modelo_a.md
 
 //@version=6
-strategy("Modelo A: estrategia", overlay = true, initial_capital = 10000, currency = currency.USD, process_orders_on_close = false, max_boxes_count = 500, max_labels_count = 500)
+strategy("Modelo A: estrategia", overlay = true, initial_capital = 10000, currency = currency.USD, process_orders_on_close = false, margin_long = 5, margin_short = 5, max_boxes_count = 500, max_labels_count = 500)
 
 // ---------- Parámetros ----------
 tz          = "America/New_York"
