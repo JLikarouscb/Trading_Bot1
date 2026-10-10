@@ -1,0 +1,211 @@
+// Modelo A: barrido de liquidez + BOS + FVG + vela de reacción
+// Solo marca señales para revisión visual. No opera.
+// Reglas y parámetros: docs/reglas_modelo_a.md
+// Todo usa velas cerradas: los swings se confirman swingLen velas después.
+
+//@version=6
+indicator("Modelo A: barrido + BOS + FVG", overlay = true, max_labels_count = 500, max_boxes_count = 500, max_lines_count = 500)
+
+// ---------- Parámetros ----------
+tz          = "America/New_York"
+biasIn      = input.string("LONG", "Bias del día", options = ["LONG", "SHORT", "OFF"])
+asiaSess    = input.session("2000-0000", "Sesión Asia (hora NY)")
+lonSess     = input.session("0200-0500", "Sesión Londres (hora NY)")
+winSess     = input.session("0930-1130", "Ventana de entrada (hora NY)")
+useAsia     = input.bool(true, "Liquidez: Asia")
+useLon      = input.bool(true, "Liquidez: Londres")
+usePrevDay  = input.bool(true, "Liquidez: día anterior")
+swingLen    = input.int(2, "Velas a cada lado del swing", minval = 1)
+fvgLookback = input.int(3, "Velas antes del BOS donde buscar el FVG", minval = 0, maxval = 10)
+minFvgPts   = input.float(0.0, "Tamaño mínimo del FVG (puntos)", minval = 0)
+useFib      = input.bool(true, "Exigir FVG en descuento/premium")
+fibLevel    = input.float(0.5, "Nivel Fibonacci máximo del FVG", minval = 0.1, maxval = 0.9, step = 0.05)
+useReaction = input.bool(true, "Exigir vela de reacción")
+stopPad     = input.float(2.0, "Margen del stop (puntos)", minval = 0)
+minRR       = input.float(1.5, "R mínima al objetivo", minval = 0)
+
+isLong  = biasIn == "LONG"
+isShort = biasIn == "SHORT"
+
+// ---------- Sesiones ----------
+inSess(string s) =>
+    not na(time(timeframe.period, s, tz))
+
+inAsia = inSess(asiaSess)
+inLon  = inSess(lonSess)
+inWin  = inSess(winSess)
+newDay = inAsia and not inAsia[1]
+winEnd = not inWin and inWin[1]
+
+// Día anterior: [1] con lookahead_on = vela diaria ya cerrada, sin mirar al futuro
+[pdh, pdl] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+// ---------- Estado ----------
+var float asiaH = na
+var float asiaL = na
+var float lonH  = na
+var float lonL  = na
+var bool  lonDone = false
+
+var bool  swept    = false
+var float sweepExt = na
+var bool  bos      = false
+var float bosExt   = na
+var float fvgTop   = na
+var float fvgBot   = na
+var float stopLvl  = na
+var bool  traded   = false
+
+var float lastSH = na
+var float lastSL = na
+
+if newDay
+    asiaH   := high
+    asiaL   := low
+    lonH    := na
+    lonL    := na
+    lonDone := false
+    traded  := false
+    swept   := false
+    bos     := false
+    fvgTop  := na
+else if inAsia
+    asiaH := math.max(nz(asiaH, high), high)
+    asiaL := math.min(nz(asiaL, low), low)
+
+if inLon
+    lonH := math.max(nz(lonH, high), high)
+    lonL := math.min(nz(lonL, low), low)
+if not inLon and inLon[1]
+    lonDone := true
+
+// Al cerrar la ventana el setup se descarta: no pasa al día siguiente
+if winEnd
+    swept  := false
+    bos    := false
+    fvgTop := na
+
+// Swings confirmados (sin mirar al futuro)
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+if not na(ph)
+    lastSH := ph
+if not na(pl)
+    lastSL := pl
+
+// Liquidez vigente
+sellSideHit = (useAsia and not na(asiaL) and low < asiaL) or (useLon and lonDone and not na(lonL) and low < lonL) or (usePrevDay and not na(pdl) and low < pdl)
+buySideHit  = (useAsia and not na(asiaH) and high > asiaH) or (useLon and lonDone and not na(lonH) and high > lonH) or (usePrevDay and not na(pdh) and high > pdh)
+
+// Objetivo: liquidez más cercana a favor
+nearestAbove(float px) =>
+    float t = na
+    if useAsia and not na(asiaH) and asiaH > px
+        t := na(t) ? asiaH : math.min(t, asiaH)
+    if useLon and lonDone and not na(lonH) and lonH > px
+        t := na(t) ? lonH : math.min(t, lonH)
+    if usePrevDay and not na(pdh) and pdh > px
+        t := na(t) ? pdh : math.min(t, pdh)
+    t
+
+nearestBelow(float px) =>
+    float t = na
+    if useAsia and not na(asiaL) and asiaL < px
+        t := na(t) ? asiaL : math.max(t, asiaL)
+    if useLon and lonDone and not na(lonL) and lonL < px
+        t := na(t) ? lonL : math.max(t, lonL)
+    if usePrevDay and not na(pdl) and pdl < px
+        t := na(t) ? pdl : math.max(t, pdl)
+    t
+
+longSig  = false
+shortSig = false
+float sigTarget = na
+
+// ---------- Largos ----------
+if isLong and inWin and not traded
+    if not swept and sellSideHit
+        swept    := true
+        sweepExt := low
+    else if swept and not bos
+        sweepExt := math.min(sweepExt, low)
+        if not na(lastSH) and close > lastSH
+            bos    := true
+            bosExt := high
+            // Buscar el FVG alcista más reciente en el impulso: low[i] > high[i+2]
+            for i = 0 to fvgLookback
+                if low[i] > high[i + 2] and low[i] - high[i + 2] >= minFvgPts
+                    top = low[i]
+                    bot = high[i + 2]
+                    eq  = sweepExt + fibLevel * (bosExt - sweepExt)
+                    if not useFib or (top + bot) / 2 <= eq
+                        fvgTop  := top
+                        fvgBot  := bot
+                        stopLvl := low[i + 2] - stopPad
+                        box.new(bar_index - i - 2, top, bar_index + 20, bot, border_color = color.new(color.green, 40), bgcolor = color.new(color.green, 85))
+                    break
+            label.new(bar_index, high, "BOS", style = label.style_label_down, color = color.new(color.green, 30), textcolor = color.white, size = size.tiny)
+    else if bos and not na(fvgTop)
+        if close < stopLvl
+            fvgTop := na
+        else if low <= fvgTop and close >= fvgBot and (not useReaction or close > open)
+            tgt  = nearestAbove(close)
+            risk = close - stopLvl
+            if not na(tgt) and risk > 0 and (tgt - close) / risk >= minRR
+                longSig   := true
+                sigTarget := tgt
+                traded    := true
+
+// ---------- Cortos (espejo) ----------
+if isShort and inWin and not traded
+    if not swept and buySideHit
+        swept    := true
+        sweepExt := high
+    else if swept and not bos
+        sweepExt := math.max(sweepExt, high)
+        if not na(lastSL) and close < lastSL
+            bos    := true
+            bosExt := low
+            for i = 0 to fvgLookback
+                if high[i] < low[i + 2] and low[i + 2] - high[i] >= minFvgPts
+                    top = low[i + 2]
+                    bot = high[i]
+                    eq  = sweepExt - fibLevel * (sweepExt - bosExt)
+                    if not useFib or (top + bot) / 2 >= eq
+                        fvgTop  := top
+                        fvgBot  := bot
+                        stopLvl := high[i + 2] + stopPad
+                        box.new(bar_index - i - 2, top, bar_index + 20, bot, border_color = color.new(color.red, 40), bgcolor = color.new(color.red, 85))
+                    break
+            label.new(bar_index, low, "BOS", style = label.style_label_up, color = color.new(color.red, 30), textcolor = color.white, size = size.tiny)
+    else if bos and not na(fvgTop)
+        if close > stopLvl
+            fvgTop := na
+        else if high >= fvgBot and close <= fvgTop and (not useReaction or close < open)
+            tgt  = nearestBelow(close)
+            risk = stopLvl - close
+            if not na(tgt) and risk > 0 and (close - tgt) / risk >= minRR
+                shortSig  := true
+                sigTarget := tgt
+                traded    := true
+
+// ---------- Dibujo ----------
+if longSig or shortSig
+    col = longSig ? color.green : color.red
+    rr  = math.abs(sigTarget - close) / math.abs(close - stopLvl)
+    label.new(bar_index, longSig ? low : high, (longSig ? "LARGO" : "CORTO") + "\nR objetivo: " + str.tostring(rr, "#.0"), style = longSig ? label.style_label_up : label.style_label_down, color = col, textcolor = color.white, size = size.small)
+    line.new(bar_index, stopLvl, bar_index + 30, stopLvl, color = color.red, style = line.style_dashed)
+    line.new(bar_index, sigTarget, bar_index + 30, sigTarget, color = color.green, style = line.style_dashed)
+
+plotshape(isLong and swept and not swept[1], "Barrido de mínimos", shape.xcross, location.belowbar, color.orange, size = size.tiny)
+plotshape(isShort and swept and not swept[1], "Barrido de máximos", shape.xcross, location.abovebar, color.orange, size = size.tiny)
+plot(asiaH, "Máximo Asia", color.new(color.blue, 40), style = plot.style_linebr)
+plot(asiaL, "Mínimo Asia", color.new(color.blue, 40), style = plot.style_linebr)
+plot(lonDone ? lonH : na, "Máximo Londres", color.new(color.purple, 40), style = plot.style_linebr)
+plot(lonDone ? lonL : na, "Mínimo Londres", color.new(color.purple, 40), style = plot.style_linebr)
+plot(pdh, "Máximo día anterior", color.new(color.gray, 30), style = plot.style_stepline)
+plot(pdl, "Mínimo día anterior", color.new(color.gray, 30), style = plot.style_stepline)
+bgcolor(inWin ? color.new(color.yellow, 92) : na, title = "Ventana de entrada")
+
+alertcondition(longSig, "Modelo A: largo", "Modelo A: señal de LARGO en {{ticker}} a {{close}}")
+alertcondition(shortSig, "Modelo A: corto", "Modelo A: señal de CORTO en {{ticker}} a {{close}}")

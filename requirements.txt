@@ -1,0 +1,6 @@
+ctrader-open-api
+pandas
+numpy
+python-dotenv
+streamlit
+pytest

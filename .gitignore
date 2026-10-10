@@ -1,0 +1,30 @@
+# Credenciales y configuración local
+.env
+*.env
+!.env.example
+secrets/
+config/local*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Datos y resultados (pesados, se regeneran)
+data/
+resultados/
+*.parquet
+*.db
+*.sqlite
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Sistema
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
