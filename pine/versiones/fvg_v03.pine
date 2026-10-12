@@ -91,6 +91,7 @@ zzPush(int d, int bx, float py) =>
     else if (d == 1 and py > zy.get(0)) or (d == -1 and py < zy.get(0))
         zx.set(0, bx)
         zy.set(0, py)
+    true
 
 ph = ta.pivothigh(high, ML, MR)
 pl = ta.pivotlow(low, ML, MR)
