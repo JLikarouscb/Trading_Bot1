@@ -1,0 +1,494 @@
+// SISTEMA v04 · Estructura + entradas FVG en un solo script (cambios en docs/versiones.md)
+//
+// QUÉ HACE, EN ORDEN
+//  1. Estructura en dos niveles (menor 5/1 y mayor 20/3), con zigzag como LuxAlgo.
+//     Ruptura (MSS/BOS) = N cierres seguidos más allá del nivel (por defecto 2), opcionalmente
+//     sin contar velas envolventes. El MSS mayor exige que la estructura menor ya haya girado.
+//     Fondo AZUL = estructura mayor alcista, ROJO = bajista.
+//  2. Bias por día relativo: "Hoy", "Hoy −1", ... (días hábiles). La tabla de abajo muestra la fecha de cada fila.
+//  3. Entrada: dentro de la ventana, a favor del bias, en un FVG formado dentro del último tramo del zigzag
+//     mayor, con su punto medio en el retroceso >= 50 % del tramo. Una entrada por tramo.
+//  4. Stop: máx./mín. de N velas desde la vela inicial del FVG hacia atrás. Tabla de RR 1–3 y 0 % del tramo.
+// Zigzag y FVG con la lógica de "ICT Silver Bullet [LuxAlgo]" (código propio; original CC BY-NC-SA 4.0).
+// Resultados BRUTOS: sin spread ni deslizamiento. Stop y objetivo en la misma vela = stop.
+
+//@version=6
+strategy("Sistema v04: estructura + FVG", overlay = true, initial_capital = 10000, currency = currency.USD, pyramiding = 10, margin_long = 0.5, margin_short = 0.5, max_boxes_count = 200, max_lines_count = 500, max_labels_count = 500)
+
+tz = "America/New_York"
+
+// =====================================================================
+// 1. BIAS
+// =====================================================================
+gB     = "1. Bias (lo das tú)"
+biasIn = input.string("POR DÍA", "Modo", options = ["POR DÍA", "LONG", "SHORT", "OFF", "ORACULO"], group = gB, tooltip = "POR DÍA: usa las filas de abajo.\nLONG/SHORT: el mismo bias para todos los días del historial.\nORACULO: dirección real del día (solo para medir entradas).")
+b0 = input.string("OFF", "Hoy", options = ["LONG", "SHORT", "OFF"], group = gB, inline = "b0")
+b1 = input.string("OFF", "Hoy −1", options = ["LONG", "SHORT", "OFF"], group = gB, inline = "b0")
+b2 = input.string("OFF", "Hoy −2", options = ["LONG", "SHORT", "OFF"], group = gB, inline = "b2")
+b3 = input.string("OFF", "Hoy −3", options = ["LONG", "SHORT", "OFF"], group = gB, inline = "b2")
+b4 = input.string("OFF", "Hoy −4", options = ["LONG", "SHORT", "OFF"], group = gB, inline = "b4")
+b5 = input.string("OFF", "Hoy −5", options = ["LONG", "SHORT", "OFF"], group = gB, inline = "b4")
+b6 = input.string("OFF", "Hoy −6", options = ["LONG", "SHORT", "OFF"], group = gB, inline = "b6")
+b7 = input.string("OFF", "Hoy −7", options = ["LONG", "SHORT", "OFF"], group = gB, inline = "b6")
+b8 = input.string("OFF", "Hoy −8", options = ["LONG", "SHORT", "OFF"], group = gB, inline = "b8")
+b9 = input.string("OFF", "Hoy −9", options = ["LONG", "SHORT", "OFF"], group = gB, inline = "b8")
+
+// =====================================================================
+// 2. HORARIO
+// =====================================================================
+gH      = "2. Horario (hora Nueva York)"
+sess    = input.session("0930-1200", "Ventana de entrada", group = gH, tooltip = "Solo se toman entradas dentro de esta ventana.")
+eodSess = input.session("1550-1600", "Cierre forzado del día", group = gH)
+
+// =====================================================================
+// 3. ESTRUCTURA
+// =====================================================================
+gS       = "3. Estructura"
+mL       = input.int(5, "Menor: velas izq.", minval = 1, maxval = 50, group = gS, inline = "m", tooltip = "Un swing necesita N velas más bajas (o altas) a la izquierda y M a la derecha.")
+mR       = input.int(1, "der.", minval = 1, maxval = 10, group = gS, inline = "m")
+ML       = input.int(20, "Mayor: velas izq.", minval = 2, maxval = 100, group = gS, inline = "M")
+MR       = input.int(3, "der.", minval = 1, maxval = 20, group = gS, inline = "M")
+nConf    = input.int(2, "Cierres seguidos para confirmar ruptura", minval = 1, maxval = 5, group = gS)
+noEngulf = input.bool(false, "Las velas envolventes no cuentan como cierre de ruptura", group = gS)
+needMin  = input.bool(true, "El MSS mayor exige que la estructura menor ya haya girado", group = gS)
+bgOn     = input.bool(true, "Fondo azul/rojo según estructura mayor", group = gS)
+zzMinOn  = input.bool(true, "Dibujar zigzag menor", group = gS, inline = "z")
+zzMayOn  = input.bool(true, "mayor", group = gS, inline = "z")
+hlOn     = input.bool(true, "Etiquetas HH/HL/LH/LL", group = gS, inline = "t")
+bosOn    = input.bool(false, "Marcar BOS", group = gS, inline = "t")
+
+// =====================================================================
+// 4. ENTRADA FVG
+// =====================================================================
+gE         = "4. Entrada FVG"
+needTrend  = input.bool(true, "Solo si la estructura mayor coincide con el bias", group = gE)
+fibMin     = input.float(0.5, "Retroceso mínimo (punto medio del FVG)", minval = 0.3, maxval = 0.9, step = 0.05, group = gE, tooltip = "0.5 = el FVG debe estar en la mitad 'cara' del tramo (premium en cortos, descuento en largos).")
+minConf    = input.int(0, "Mínimo de niveles OTE dentro del FVG", minval = 0, maxval = 3, group = gE, tooltip = "Cuántos de 0.618 / 0.705 / 0.786 deben caer dentro del FVG. 0 = no se exige.")
+sameCandle = input.bool(true, "Vela de entrada a favor del bias", group = gE)
+maxDay     = input.int(3, "Máximo de entradas por día (0 = sin límite)", minval = 0, group = gE)
+
+// =====================================================================
+// 5. STOP Y OBJETIVO
+// =====================================================================
+gX      = "5. Stop y objetivo"
+nStop   = input.int(3, "Velas para el stop (desde la vela inicial del FVG hacia atrás)", minval = 1, maxval = 10, group = gX)
+stopPad = input.float(1.0, "Margen del stop (puntos)", minval = 0, group = gX)
+tgtMode = input.string("R fija", "Objetivo de los trades reales", options = ["R fija", "0 % del tramo"], group = gX)
+tgtR    = input.float(2.0, "R fija", minval = 0.5, step = 0.5, group = gX)
+qty     = input.float(1.0, "Contratos por entrada", minval = 0.01, group = gX)
+showFib = input.bool(true, "Dibujar Fibonacci del tramo activo", group = gX)
+
+// =====================================================================
+// FECHAS: día de trading (desde las 18:00 NY cuenta como el día siguiente)
+// =====================================================================
+dnum(int t) =>
+    t2 = t + 6 * 3600000
+    int(math.floor(timestamp(tz, year(t2, tz), month(t2, tz), dayofmonth(t2, tz), 12, 0) / 86400000))
+isBiz(int d) =>
+    w = (d + 4) % 7
+    w >= 1 and w <= 5
+
+curD  = dnum(time)
+lastD = dnum(last_bar_time)
+int off = na
+if lastD - curD <= 25 and isBiz(curD)
+    c = 0
+    if lastD > curD
+        for d = curD + 1 to lastD
+            if isBiz(d)
+                c += 1
+    off := c
+
+bdir(string b) =>
+    b == "LONG" ? 1 : b == "SHORT" ? -1 : 0
+perDay = na(off) ? 0 : off == 0 ? bdir(b0) : off == 1 ? bdir(b1) : off == 2 ? bdir(b2) : off == 3 ? bdir(b3) : off == 4 ? bdir(b4) : off == 5 ? bdir(b5) : off == 6 ? bdir(b6) : off == 7 ? bdir(b7) : off == 8 ? bdir(b8) : off == 9 ? bdir(b9) : 0
+
+[dO, dC] = request.security(syminfo.tickerid, "D", [open, close], lookahead = barmerge.lookahead_on)
+dayDir = dC > dO ? 1 : dC < dO ? -1 : 0
+dir = biasIn == "POR DÍA" ? perDay : biasIn == "LONG" ? 1 : biasIn == "SHORT" ? -1 : biasIn == "ORACULO" ? dayDir : 0
+
+inWin    = not na(time(timeframe.period, sess, tz))
+winStart = inWin and not inWin[1]
+winEnd   = not inWin and inWin[1]
+inEod    = not na(time(timeframe.period, eodSess, tz))
+
+// =====================================================================
+// MOTOR DE ESTRUCTURA
+// =====================================================================
+type ZZ
+    int[]   d
+    int[]   x
+    float[] y
+    line[]  ln
+    label[] lb
+    line[]  ev
+    label[] evl
+    int     trend
+    int     hiBrokenX
+    int     loBrokenX
+    int     refHx
+    int     refLx
+    int     cntUp
+    int     cntDn
+
+newZZ() =>
+    ZZ.new(array.new_int(), array.new_int(), array.new_float(), array.new_line(), array.new_label(), array.new_line(), array.new_label(), 0, na, na, na, na, 0, 0)
+
+method tag(ZZ z) =>
+    string t = ""
+    if z.d.size() >= 3
+        t := z.d.get(0) == 1 ? (z.y.get(0) > z.y.get(2) ? "HH" : "LH") : (z.y.get(0) < z.y.get(2) ? "LL" : "HL")
+    t
+
+method push(ZZ z, int d, int bx, float py, color c, string pre, bool draw) =>
+    bool changed = false
+    if z.d.size() == 0 or z.d.get(0) != d
+        line l = na
+        if draw and z.d.size() > 0
+            l := line.new(z.x.get(0), z.y.get(0), bx, py, color = color.new(c, 25), width = 1)
+        label b = na
+        if draw and hlOn
+            b := label.new(bx, py, "", style = d == 1 ? label.style_label_down : label.style_label_up, color = color.new(c, 100), textcolor = c, size = size.tiny)
+        z.d.unshift(d)
+        z.x.unshift(bx)
+        z.y.unshift(py)
+        z.ln.unshift(l)
+        z.lb.unshift(b)
+        changed := true
+        if z.d.size() > 60
+            z.d.pop()
+            z.x.pop()
+            z.y.pop()
+            line.delete(z.ln.pop())
+            label.delete(z.lb.pop())
+    else if (d == 1 and py > z.y.get(0)) or (d == -1 and py < z.y.get(0))
+        z.x.set(0, bx)
+        z.y.set(0, py)
+        line l = z.ln.get(0)
+        if not na(l)
+            line.set_xy2(l, bx, py)
+        label b = z.lb.get(0)
+        if not na(b)
+            label.set_xy(b, bx, py)
+        changed := true
+    if changed
+        label b = z.lb.get(0)
+        if not na(b)
+            label.set_text(b, pre + z.tag())
+    changed
+
+method mark(ZZ z, int x1, float y, string txt, color c, bool up, bool solid) =>
+    z.ev.unshift(line.new(x1, y, bar_index, y, color = c, style = solid ? line.style_solid : line.style_dashed, width = solid ? 2 : 1))
+    z.evl.unshift(label.new(int(math.round((x1 + bar_index) / 2)), y, txt, style = up ? label.style_label_down : label.style_label_up, color = color.new(c, 100), textcolor = c, size = size.tiny))
+    if z.ev.size() > 40
+        line.delete(z.ev.pop())
+        label.delete(z.evl.pop())
+    true
+
+bullEng = close > open and close[1] < open[1] and close >= open[1] and open <= close[1]
+bearEng = close < open and close[1] > open[1] and close <= open[1] and open >= close[1]
+
+// Rupturas con N cierres seguidos. allowUp/allowDn bloquean el MSS (jerarquía menor -> mayor).
+method breaks(ZZ z, color c, string pre, bool allowUp, bool allowDn) =>
+    if z.d.size() >= 3
+        iH = z.d.get(0) == 1 ? 2 : 1
+        iL = z.d.get(0) == -1 ? 2 : 1
+        hy = z.y.get(iH)
+        hx = z.x.get(iH)
+        ly = z.y.get(iL)
+        lx = z.x.get(iL)
+        if na(z.refHx) or hx != z.refHx
+            z.refHx := hx
+            z.cntUp := 0
+        if na(z.refLx) or lx != z.refLx
+            z.refLx := lx
+            z.cntDn := 0
+        if close > hy
+            if not (noEngulf and bullEng)
+                z.cntUp += 1
+        else
+            z.cntUp := 0
+        if close < ly
+            if not (noEngulf and bearEng)
+                z.cntDn += 1
+        else
+            z.cntDn := 0
+        if z.cntUp >= nConf and (na(z.hiBrokenX) or hx != z.hiBrokenX)
+            isMss = z.trend < 1
+            if not isMss or allowUp
+                if isMss or bosOn
+                    z.mark(hx, hy, pre + (isMss ? "MSS" : "BOS"), c, true, isMss)
+                z.trend     := 1
+                z.hiBrokenX := hx
+        if z.cntDn >= nConf and (na(z.loBrokenX) or lx != z.loBrokenX)
+            isMss = z.trend > -1
+            if not isMss or allowDn
+                if isMss or bosOn
+                    z.mark(lx, ly, pre + (isMss ? "MSS" : "BOS"), c, false, isMss)
+                z.trend     := -1
+                z.loBrokenX := lx
+    true
+
+var ZZ zm = newZZ()
+var ZZ zM = newZZ()
+
+mph = ta.pivothigh(high, mL, mR)
+mpl = ta.pivotlow(low, mL, mR)
+Mph = ta.pivothigh(high, ML, MR)
+Mpl = ta.pivotlow(low, ML, MR)
+
+if not na(mph)
+    zm.push(1, bar_index - mR, mph, color.blue, "", zzMinOn)
+if not na(mpl)
+    zm.push(-1, bar_index - mR, mpl, color.blue, "", zzMinOn)
+zm.breaks(color.blue, "", true, true)
+
+if not na(Mph)
+    zM.push(1, bar_index - MR, Mph, color.orange, "M·", zzMayOn)
+if not na(Mpl)
+    zM.push(-1, bar_index - MR, Mpl, color.orange, "M·", zzMayOn)
+zM.breaks(color.orange, "M·", not needMin or zm.trend == 1, not needMin or zm.trend == -1)
+
+bgcolor(bgOn and zM.trend == 1 ? color.new(color.blue, 93) : bgOn and zM.trend == -1 ? color.new(color.red, 93) : na, title = "Estructura mayor")
+
+// Ventana: líneas verticales de inicio y fin
+if winStart
+    line.new(bar_index, low, bar_index, high, extend = extend.both, color = color.new(color.purple, 40), style = line.style_dashed)
+if winEnd
+    line.new(bar_index, low, bar_index, high, extend = extend.both, color = color.new(color.purple, 70), style = line.style_dotted)
+
+// =====================================================================
+// TRAMO ACTIVO A FAVOR DEL BIAS (zigzag mayor)
+// =====================================================================
+float legS  = na
+float legE  = na
+int   legSx = na
+int   legEx = na
+if dir != 0 and zM.d.size() >= 2
+    iEnd = zM.d.get(0) == dir ? 0 : 1
+    if iEnd + 1 < zM.d.size()
+        legE  := zM.y.get(iEnd)
+        legEx := zM.x.get(iEnd)
+        legS  := zM.y.get(iEnd + 1)
+        legSx := zM.x.get(iEnd + 1)
+
+retr(float p) =>
+    na(legS) or legS == legE ? na : (p - legE) / (legS - legE)
+fibPx(float f) =>
+    legE + f * (legS - legE)
+
+// =====================================================================
+// FVG
+// =====================================================================
+type F
+    int   d
+    float top
+    float bot
+    float stop
+    int   bar
+    bool  used
+
+var F[] fvgs = array.new<F>()
+hiN = ta.highest(high, nStop)
+loN = ta.lowest(low, nStop)
+if high < low[2]
+    fvgs.push(F.new(-1, low[2], high, hiN[2] + stopPad, bar_index, false))
+if low > high[2]
+    fvgs.push(F.new(1, low, high[2], loN[2] - stopPad, bar_index, false))
+if fvgs.size() > 200
+    fvgs.shift()
+
+// =====================================================================
+// SIMULACIÓN DE RR
+// =====================================================================
+type Vt
+    int     d
+    float   entry
+    float   stop
+    float   risk
+    float[] tg
+    int[]   st
+
+var Vt[]    vts = array.new<Vt>()
+var float[] rrs = array.from(1.0, 1.5, 2.0, 2.5, 3.0)
+var int[]   cW  = array.new_int(6, 0)
+var int[]   cL  = array.new_int(6, 0)
+var int[]   cT  = array.new_int(6, 0)
+var float[] sR  = array.new_float(6, 0)
+
+if vts.size() > 0
+    for i = vts.size() - 1 to 0
+        v = vts.get(i)
+        stopHit = v.d == 1 ? low <= v.stop : high >= v.stop
+        openLeft = 0
+        for j = 0 to 5
+            if v.st.get(j) == 0
+                t = v.tg.get(j)
+                tgtHit = v.d == 1 ? high >= t : low <= t
+                if stopHit
+                    v.st.set(j, -1)
+                    cL.set(j, cL.get(j) + 1)
+                    sR.set(j, sR.get(j) - 1)
+                else if tgtHit
+                    v.st.set(j, 1)
+                    cW.set(j, cW.get(j) + 1)
+                    sR.set(j, sR.get(j) + (t - v.entry) * v.d / v.risk)
+                else if inEod
+                    v.st.set(j, 2)
+                    cT.set(j, cT.get(j) + 1)
+                    sR.set(j, sR.get(j) + (close - v.entry) * v.d / v.risk)
+                else
+                    openLeft += 1
+        if openLeft == 0
+            vts.remove(i)
+
+// =====================================================================
+// ENTRADA
+// =====================================================================
+var int nEntries  = 0
+var int dE        = 0
+var int days      = 0
+var int tradedLeg = na
+if winStart
+    dE   := 0
+    days += dir != 0 ? 1 : 0
+
+F     pick  = na
+float pRisk = na
+int   pConf = 0
+float pRetr = na
+legValid = not na(legS) and (dir == 1 ? close > legS : close < legS)
+if inWin and dir != 0 and legValid and (na(tradedLeg) or tradedLeg != legSx) and (maxDay == 0 or dE < maxDay) and (not needTrend or zM.trend == dir) and not inEod
+    for f in fvgs
+        if f.d == dir and not f.used and f.bar - 2 >= legSx and f.bar <= legEx + MR
+            r = retr((f.top + f.bot) / 2)
+            if not na(r) and r >= fibMin and r < 1
+                conf = 0
+                for lv in array.from(0.618, 0.705, 0.786)
+                    p = fibPx(lv)
+                    if p >= f.bot and p <= f.top
+                        conf += 1
+                touch    = dir == 1 ? low < f.top and close > f.bot : high > f.bot and close < f.top
+                candleOk = not sameCandle or (dir == 1 ? close > open : close < open)
+                risk     = dir == 1 ? close - f.stop : f.stop - close
+                if touch and candleOk and risk > 0 and conf >= minConf
+                    if na(pick) or conf > pConf or (conf == pConf and r > pRetr)
+                        pick  := f
+                        pRisk := risk
+                        pConf := conf
+                        pRetr := r
+
+if not na(pick)
+    pick.used := true
+    nEntries  += 1
+    dE        += 1
+    tradedLeg := legSx
+    id       = "E" + str.tostring(nEntries)
+    leg0     = legE
+    tgtLegOk = dir == 1 ? leg0 > close : leg0 < close
+    tgtReal  = tgtMode == "0 % del tramo" and tgtLegOk ? leg0 : close + dir * tgtR * pRisk
+    strategy.entry(id, dir == 1 ? strategy.long : strategy.short, qty = qty, comment = (dir == 1 ? "Largo #" : "Corto #") + str.tostring(dE))
+    strategy.exit("X" + id, from_entry = id, stop = pick.stop, limit = tgtReal, comment_loss = "Stop", comment_profit = "Objetivo")
+    tg = array.new_float()
+    st = array.new_int()
+    for rr in rrs
+        tg.push(close + dir * rr * pRisk)
+        st.push(0)
+    tg.push(leg0)
+    st.push(tgtLegOk ? 0 : 3)
+    vts.push(Vt.new(dir, close, pick.stop, pRisk, tg, st))
+    box.new(pick.bar - 2, pick.top, bar_index, pick.bot, border_color = color.new(dir == 1 ? color.teal : color.red, 30), bgcolor = color.new(dir == 1 ? color.teal : color.red, 82))
+    label.new(bar_index, dir == 1 ? low : high, (dir == 1 ? "Largo " : "Corto ") + str.tostring(dE) + "\nRetroceso " + str.tostring(pRetr * 100, "#") + " %\nOTE " + str.tostring(pConf) + "/3", style = dir == 1 ? label.style_label_up : label.style_label_down, color = dir == 1 ? color.teal : color.red, textcolor = color.white, size = size.small, tooltip = "Riesgo " + str.tostring(pRisk, "#.#") + " pts\nStop " + str.tostring(pick.stop, format.mintick) + "\n0 % del tramo " + str.tostring(leg0, format.mintick))
+    alert((dir == 1 ? "LARGO " : "CORTO ") + syminfo.ticker + " a " + str.tostring(close, format.mintick) + " · stop " + str.tostring(pick.stop, format.mintick) + " · OTE " + str.tostring(pConf) + "/3", alert.freq_once_per_bar_close)
+
+alertcondition(not na(pick) and dir == 1, "v04 largo", "Sistema v04: entrada LARGO en {{ticker}} a {{close}}")
+alertcondition(not na(pick) and dir == -1, "v04 corto", "Sistema v04: entrada CORTO en {{ticker}} a {{close}}")
+
+if inEod and strategy.position_size != 0
+    strategy.close_all(comment = "Fin del día")
+
+// =====================================================================
+// FIBONACCI DEL TRAMO ACTIVO
+// =====================================================================
+var line[]  fl  = array.new_line()
+var label[] fla = array.new_label()
+var float[] fLv = array.from(0.0, 0.5, 0.618, 0.705, 0.786, 1.0)
+if barstate.islast
+    if fl.size() == 0
+        for i = 0 to 5
+            fl.push(line.new(bar_index, close, bar_index, close, color = color.gray, style = line.style_dotted))
+            fla.push(label.new(bar_index, close, "", style = label.style_none, textcolor = color.gray, size = size.tiny))
+    for i = 0 to 5
+        lv = fLv.get(i)
+        ln = fl.get(i)
+        lb = fla.get(i)
+        if showFib and not na(legS) and dir != 0
+            p = fibPx(lv)
+            c = lv == 0.5 ? color.gray : lv > 0.5 and lv < 1 ? color.red : color.silver
+            line.set_xy1(ln, legSx, p)
+            line.set_xy2(ln, bar_index + 10, p)
+            line.set_color(ln, c)
+            label.set_xy(lb, bar_index + 10, p)
+            label.set_text(lb, str.tostring(lv, "#.###") + " (" + str.tostring(p, format.mintick) + ")")
+            label.set_textcolor(lb, c)
+        else
+            line.set_xy1(ln, bar_index, close)
+            line.set_xy2(ln, bar_index, close)
+            label.set_text(lb, "")
+
+// =====================================================================
+// TABLAS
+// =====================================================================
+var table tb = table.new(position.top_right, 7, 9, bgcolor = color.new(color.black, 15), border_width = 1)
+cell(int c, int r, string t, color col) =>
+    table.cell(tb, c, r, t, text_color = col, text_size = size.small)
+
+trendTxt(int t) =>
+    t == 1 ? "ALCISTA" : t == -1 ? "BAJISTA" : "-"
+trendCol(int t) =>
+    t == 1 ? color.aqua : t == -1 ? color.red : color.gray
+
+if barstate.islast
+    cell(0, 0, "Objetivo", color.white)
+    cell(1, 0, "Ganan", color.white)
+    cell(2, 0, "Pierden", color.white)
+    cell(3, 0, "Por hora", color.white)
+    cell(4, 0, "% acierto", color.white)
+    cell(5, 0, "R total", color.white)
+    cell(6, 0, "R prom.", color.white)
+    for j = 0 to 5
+        nm = j < 5 ? str.tostring(rrs.get(j), "#.#") + " R" : "0 % tramo"
+        w  = cW.get(j)
+        l  = cL.get(j)
+        t  = cT.get(j)
+        n  = w + l + t
+        cell(0, j + 1, nm, color.white)
+        cell(1, j + 1, str.tostring(w), color.white)
+        cell(2, j + 1, str.tostring(l), color.white)
+        cell(3, j + 1, str.tostring(t), color.white)
+        cell(4, j + 1, n > 0 ? str.tostring(100.0 * w / n, "#") + " %" : "-", color.white)
+        cell(5, j + 1, str.tostring(sR.get(j), "#.#"), sR.get(j) >= 0 ? color.lime : color.red)
+        cell(6, j + 1, n > 0 ? str.tostring(sR.get(j) / n, "#.##") : "-", color.white)
+    cell(0, 7, "Estructura", color.gray)
+    cell(1, 7, "menor", color.gray)
+    cell(2, 7, trendTxt(zm.trend), trendCol(zm.trend))
+    cell(3, 7, "mayor", color.gray)
+    cell(4, 7, trendTxt(zM.trend), trendCol(zM.trend))
+    cell(5, 7, str.tostring(nEntries) + " entradas", color.gray)
+    cell(6, 7, str.tostring(days) + " días", color.gray)
+
+// Tabla de fechas del bias
+var table tbD = table.new(position.bottom_left, 3, 11, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast and biasIn == "POR DÍA"
+    table.cell(tbD, 0, 0, "Fila", text_color = color.white, text_size = size.small)
+    table.cell(tbD, 1, 0, "Fecha", text_color = color.white, text_size = size.small)
+    table.cell(tbD, 2, 0, "Bias", text_color = color.white, text_size = size.small)
+    d = lastD
+    for r = 0 to 9
+        while not isBiz(d)
+            d -= 1
+        bs = r == 0 ? b0 : r == 1 ? b1 : r == 2 ? b2 : r == 3 ? b3 : r == 4 ? b4 : r == 5 ? b5 : r == 6 ? b6 : r == 7 ? b7 : r == 8 ? b8 : b9
+        table.cell(tbD, 0, r + 1, r == 0 ? "Hoy" : "Hoy −" + str.tostring(r), text_color = color.white, text_size = size.small)
+        table.cell(tbD, 1, r + 1, str.format_time(d * 86400000, "EEE dd MMM", "UTC"), text_color = color.white, text_size = size.small)
+        table.cell(tbD, 2, r + 1, bs, text_color = bs == "LONG" ? color.aqua : bs == "SHORT" ? color.red : color.gray, text_size = size.small)
+        d -= 1
