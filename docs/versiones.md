@@ -14,3 +14,13 @@ Resultados brutos (sin spread). "R prom." = R promedio por entrada.
 - 93 entradas en 10 días (~9 por día): demasiadas.
 - 53 % de acierto a 1R es casi una moneda al aire, aun con el bias correcto. Neto de spread sería negativo.
 - La ganancia crece al reducir el objetivo, señal de que el precio rara vez se aleja mucho a favor tras la entrada.
+
+# Versiones del medidor de estructura
+
+Archivos en `pine/estructura/estructura_vNN.pine`.
+
+| Versión | Cambio |
+| --- | --- |
+| v01 | Zigzag alternado igual que LuxAlgo (fusión de pivotes), HH/HL/LH/LL, MSS con el alto/bajo de referencia de LuxAlgo, BOS opcional, dos niveles (menor 5/1 y mayor 20/3), tabla de tendencia |
+
+Nota: la estructura de `fvg_v02` usaba el último pivote suelto (sin zigzag) y marcaba BOS en cada ruptura; por eso sus marcas no coincidían con LuxAlgo.

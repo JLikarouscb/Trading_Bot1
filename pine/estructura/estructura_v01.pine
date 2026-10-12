@@ -1,0 +1,154 @@
+// ESTRUCTURA v01 · Medidor de estructura de mercado (solo indicador, no opera)
+// Lógica de swings igual que "ICT Silver Bullet [LuxAlgo]" (código propio; original CC BY-NC-SA 4.0):
+//   1. Pivote alto = máximo con N velas más bajas a la izquierda y M a la derecha (igual para bajos).
+//   2. Zigzag ALTERNADO: si llegan dos pivotes altos seguidos sin un bajo entre ellos,
+//      no se agrega otro punto: el último alto se MUEVE al más alto. Así los mini-pivotes se fusionan.
+//   3. MSS alcista = cierre por encima del alto de referencia cuando la tendencia no era alcista.
+//      Alto de referencia (igual que LuxAlgo): si el último punto del zigzag es un alto (subida en curso),
+//      se usa el alto ANTERIOR; si el último punto es un bajo, se usa el alto más reciente.
+//   4. BOS (opcional) = la misma ruptura cuando la tendencia ya iba en esa dirección.
+// Dos niveles: estructura menor (5/1, como LuxAlgo) y mayor (swings más amplios).
+
+//@version=6
+indicator("Estructura v01", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+g1    = "Estructura menor (LuxAlgo)"
+mOn   = input.bool(true, "Mostrar", group = g1)
+mL    = input.int(5, "Velas a la izquierda", minval = 1, maxval = 50, group = g1)
+mR    = input.int(1, "Velas a la derecha", minval = 1, maxval = 10, group = g1)
+mCol  = input.color(color.blue, "Color", group = g1)
+g2    = "Estructura mayor"
+MOn   = input.bool(true, "Mostrar", group = g2)
+ML    = input.int(20, "Velas a la izquierda", minval = 1, maxval = 100, group = g2)
+MR    = input.int(3, "Velas a la derecha", minval = 1, maxval = 20, group = g2)
+MCol  = input.color(color.orange, "Color", group = g2)
+g3    = "Qué dibujar"
+zzOn  = input.bool(true, "Zigzag", group = g3)
+hlOn  = input.bool(true, "Etiquetas HH / HL / LH / LL", group = g3)
+mssOn = input.bool(true, "MSS (cambio de estructura)", group = g3)
+bosOn = input.bool(false, "BOS (continuación)", group = g3)
+
+type ZZ
+    int[]   d
+    int[]   x
+    float[] y
+    line[]  ln
+    label[] lb
+    int     trend
+    int     hiBrokenX
+    int     loBrokenX
+    int     since
+
+// Texto HH/HL/LH/LL del punto más reciente comparado con el anterior del mismo tipo
+method tag(ZZ z) =>
+    string t = ""
+    if z.d.size() >= 3
+        t := z.d.get(0) == 1 ? (z.y.get(0) > z.y.get(2) ? "HH" : "LH") : (z.y.get(0) < z.y.get(2) ? "LL" : "HL")
+    t
+
+// Agrega un punto nuevo o mueve el último si es del mismo tipo y más extremo
+method push(ZZ z, int dir, int bx, float py, color c, string pre) =>
+    bool changed = false
+    if z.d.size() == 0 or z.d.get(0) != dir
+        line l = na
+        if zzOn and z.d.size() > 0
+            l := line.new(z.x.get(0), z.y.get(0), bx, py, color = color.new(c, 30), width = 1)
+        label b = na
+        if hlOn
+            b := label.new(bx, py, "", style = dir == 1 ? label.style_label_down : label.style_label_up, color = color.new(c, 100), textcolor = c, size = size.tiny)
+        z.d.unshift(dir)
+        z.x.unshift(bx)
+        z.y.unshift(py)
+        z.ln.unshift(l)
+        z.lb.unshift(b)
+        changed := true
+        if z.d.size() > 80
+            z.d.pop()
+            z.x.pop()
+            z.y.pop()
+            line.delete(z.ln.pop())
+            label.delete(z.lb.pop())
+    else if (dir == 1 and py > z.y.get(0)) or (dir == -1 and py < z.y.get(0))
+        z.x.set(0, bx)
+        z.y.set(0, py)
+        line l = z.ln.get(0)
+        if not na(l)
+            line.set_xy2(l, bx, py)
+        label b = z.lb.get(0)
+        if not na(b)
+            label.set_xy(b, bx, py)
+        changed := true
+    if changed
+        label b = z.lb.get(0)
+        if not na(b)
+            label.set_text(b, pre + z.tag())
+
+// Rupturas: MSS / BOS
+method breaks(ZZ z, color c, string pre) =>
+    if z.d.size() >= 3
+        iH = z.d.get(0) == 1 ? 2 : 1
+        iL = z.d.get(0) == -1 ? 2 : 1
+        hy = z.y.get(iH)
+        hx = z.x.get(iH)
+        ly = z.y.get(iL)
+        lx = z.x.get(iL)
+        if close > hy and (na(z.hiBrokenX) or hx != z.hiBrokenX)
+            isMss = z.trend < 1
+            if (isMss and mssOn) or (not isMss and bosOn)
+                line.new(hx, hy, bar_index, hy, color = c, style = isMss ? line.style_solid : line.style_dashed, width = isMss ? 2 : 1)
+                label.new(int(math.round((hx + bar_index) / 2)), hy, pre + (isMss ? "MSS" : "BOS"), style = label.style_label_down, color = color.new(c, 100), textcolor = c, size = size.tiny)
+            if isMss
+                z.since := bar_index
+            z.trend     := 1
+            z.hiBrokenX := hx
+        if close < ly and (na(z.loBrokenX) or lx != z.loBrokenX)
+            isMss = z.trend > -1
+            if (isMss and mssOn) or (not isMss and bosOn)
+                line.new(lx, ly, bar_index, ly, color = c, style = isMss ? line.style_solid : line.style_dashed, width = isMss ? 2 : 1)
+                label.new(int(math.round((lx + bar_index) / 2)), ly, pre + (isMss ? "MSS" : "BOS"), style = label.style_label_up, color = color.new(c, 100), textcolor = c, size = size.tiny)
+            if isMss
+                z.since := bar_index
+            z.trend     := -1
+            z.loBrokenX := lx
+
+var ZZ zm = ZZ.new(array.new_int(), array.new_int(), array.new_float(), array.new_line(), array.new_label(), 0, na, na, na)
+var ZZ zM = ZZ.new(array.new_int(), array.new_int(), array.new_float(), array.new_line(), array.new_label(), 0, na, na, na)
+
+mph = ta.pivothigh(high, mL, mR)
+mpl = ta.pivotlow(low, mL, mR)
+Mph = ta.pivothigh(high, ML, MR)
+Mpl = ta.pivotlow(low, ML, MR)
+
+if mOn
+    if not na(mph)
+        zm.push(1, bar_index - mR, mph, mCol, "")
+    if not na(mpl)
+        zm.push(-1, bar_index - mR, mpl, mCol, "")
+    zm.breaks(mCol, "")
+
+if MOn
+    if not na(Mph)
+        zM.push(1, bar_index - MR, Mph, MCol, "M·")
+    if not na(Mpl)
+        zM.push(-1, bar_index - MR, Mpl, MCol, "M·")
+    zM.breaks(MCol, "M·")
+
+// ---------- Medidor ----------
+trendTxt(int t) =>
+    t == 1 ? "ALCISTA" : t == -1 ? "BAJISTA" : "SIN DEFINIR"
+trendCol(int t) =>
+    t == 1 ? color.lime : t == -1 ? color.red : color.gray
+sinceTxt(int b) =>
+    na(b) ? "" : str.tostring(bar_index - b) + " velas"
+
+var table tb = table.new(position.top_right, 3, 3, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast
+    table.cell(tb, 0, 0, "Estructura", text_color = color.white, text_size = size.small)
+    table.cell(tb, 1, 0, "Tendencia", text_color = color.white, text_size = size.small)
+    table.cell(tb, 2, 0, "Desde el MSS", text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 1, "Menor " + str.tostring(mL) + "/" + str.tostring(mR), text_color = mCol, text_size = size.small)
+    table.cell(tb, 1, 1, mOn ? trendTxt(zm.trend) : "-", text_color = trendCol(zm.trend), text_size = size.small)
+    table.cell(tb, 2, 1, mOn ? sinceTxt(zm.since) : "-", text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 2, "Mayor " + str.tostring(ML) + "/" + str.tostring(MR), text_color = MCol, text_size = size.small)
+    table.cell(tb, 1, 2, MOn ? trendTxt(zM.trend) : "-", text_color = trendCol(zM.trend), text_size = size.small)
+    table.cell(tb, 2, 2, MOn ? sinceTxt(zM.since) : "-", text_color = color.white, text_size = size.small)
