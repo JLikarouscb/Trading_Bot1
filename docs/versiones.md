@@ -8,6 +8,7 @@ Resultados brutos (sin spread). "R prom." = R promedio por entrada.
 | --- | --- | --- | --- | --- | --- |
 | v01 | Base: FVG de la ventana, vela a favor, re-entrada tras 1R o 5 velas | 93 | 53 % / +0.05 | 31 % / −0.04 | 18 % / −0.15 |
 | v02 | + Estructura de 1 min a favor (BOS/MSS), FVG del impulso que rompió, máx. 3 entradas por día | pendiente | | | |
+| v03 | Nueva lógica: tramo del zigzag mayor + FVG del impulso en retroceso >= 50 % (OTE 0.618/0.705/0.786), 1 entrada por tramo, stop en máx./mín. de 3 velas desde la vela inicial, ventana 9:30–12:00 NY | pendiente | | | |
 
 ## Lectura de v01
 
