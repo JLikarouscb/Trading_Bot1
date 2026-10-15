@@ -10,7 +10,8 @@ Resultados brutos (sin spread). "R prom." = R promedio por entrada.
 | v02 | + Estructura de 1 min a favor (BOS/MSS), FVG del impulso que rompió, máx. 3 entradas por día | pendiente | | | |
 | v03 | Nueva lógica: tramo del zigzag mayor + FVG del impulso en retroceso >= 50 % (OTE 0.618/0.705/0.786), 1 entrada por tramo, stop en máx./mín. de 3 velas desde la vela inicial, ventana 9:30–12:00 NY | 2 (pocos días con bias) | 100 % / — | 100 % / — | 50 % / — |
 | sistema_v04 | Estructura + FVG en un solo script; ruptura con 2 cierres seguidos (envolventes opcionales), MSS mayor exige giro de la menor, fondo azul/rojo, bias relativo "Hoy −N" con tabla de fechas | pendiente | | | |
-| sistema_v05 | Sin fondo de color: el zigzag mayor cambia a verde (alcista) / rojo (bajista); cajas de killzones Asia, Londres y NY 8:30–9:30 | pendiente | | | |
+| sistema_v05 | Sin fondo de color: el zigzag mayor cambia a verde (alcista) / rojo (bajista); cajas de killzones Asia, Londres y NY 8:30–9:30 | 2 semanas con bias manual: +17.4 % (1 contrato fijo) | | | |
+| sistema_v06 | Zigzag dibujado en todo el gráfico: los dibujos ya no se borran a los 60 puntos (tope ajustable: mayor 220, menor 80, MSS 50) | pendiente | | | |
 
 ## Lectura de v01
 
