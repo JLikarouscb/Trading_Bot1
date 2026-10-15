@@ -19,6 +19,7 @@ Resultados brutos (sin spread). "R prom." = R promedio por entrada.
 | sistema_v11 | Nuevo modelo: estructura M5 obligatoria (desde velas de 5 min cerradas), FVG M1 a favor; regla A (Fibo >= 50 %, primer toque) y regla B (tercer toque + cierre de confirmación); invalidación por mecha de la vela inicial + tolerancia; tabla por regla y RR | La estructura M5 con swings 5/1 daba CHoCH en movimientos pequeños; el zigzag grande se veía bajista todo el día | | | |
 | sistema_v12 | M5 con swings 20/3; invalidación del FVG por vela inicial o intermedia; marca del FVG de cada entrada | pendiente | | | |
 | sistema_v13 | Regla A mide el Fibonacci en el último tramo del zigzag menor M1 (5/1) a favor de M5 (opción mayor M1 o M5); Fibonacci del tramo activo dibujado | pendiente | | | |
+| sistema_v14 | Regla A con dos botones: retrocesos del zigzag menor y del mayor M1 a la vez; tabla A·menor / A·mayor / A·ambos / B; Fibonacci de ambos tramos dibujado | pendiente | | | |
 
 ## Lectura de v01
 

@@ -73,7 +73,7 @@ Para esta prueba reemplaza las reglas 3–17.
 | 31 | La estructura M5 usa swings mayores (20/3 en velas de 5 min) — v12 | A |
 | 32 | Parámetro: invalidar el FVG con la mecha de la vela inicial o de la vela intermedia; el stop sigue en la vela inicial + tolerancia | P |
 | 33 | Cada entrada marca su FVG (contorno amarillo + etiqueta con toque, rango y stop) | A |
-| 34 | Regla A: el Fibonacci se mide sobre el último tramo del zigzag menor de 1 minuto (5/1) a favor de M5; el FVG debe haberse formado dentro de ese tramo — v13 | P |
+| 34 | Regla A: el retroceso se mide sobre el último tramo del zigzag menor (5/1) Y del mayor (20/3) de 1 minuto a favor de M5, cada uno con su botón; el FVG debe haberse formado dentro del tramo. La tabla separa A·menor, A·mayor, A·ambos — v14 | A |
 
 ## Descartado
 
