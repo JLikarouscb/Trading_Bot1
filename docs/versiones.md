@@ -16,7 +16,8 @@ Resultados brutos (sin spread). "R prom." = R promedio por entrada.
 | sistema_v08 | Estructura mayor: nuevo extremo solo con cierre más allá (mecha = "barrido"); MSS mayor exige superar el 50 % del movimiento origen→extremo; polilíneas se redibujan solo si cambian | Descartada: el zigzag quedó bajista todo el tiempo (el MSS alcista casi nunca pasaba los filtros) | | | |
 | sistema_v09 | Base v07 (estructura sin reglas de v08). Bias automático = estructura mayor; 6 killzones editables con caja/operar; cierre al terminar la killzone; tabla de resultados por killzone | Probado con ORÁCULO por error: 57 trades, 38.6 % WR; Asia +14.2R, Londres −12.4R | | | |
 | sistema_v10 | Reescritura simplificada según docs/acuerdos.md: 4 grupos de ajustes, CHoCH/BOS mayores, color por estado de estructura, hasta 3 tests por FVG, 2 entradas por tramo y 5 por killzone, stop de 5 velas, modo POR SESIÓN, marcas abajo | pendiente | | | |
-| sistema_v11 | Nuevo modelo: estructura M5 obligatoria (desde velas de 5 min cerradas), FVG M1 a favor; regla A (Fibo >= 50 %, primer toque) y regla B (tercer toque + cierre de confirmación); invalidación por mecha de la vela inicial + tolerancia; tabla por regla y RR | pendiente | | | |
+| sistema_v11 | Nuevo modelo: estructura M5 obligatoria (desde velas de 5 min cerradas), FVG M1 a favor; regla A (Fibo >= 50 %, primer toque) y regla B (tercer toque + cierre de confirmación); invalidación por mecha de la vela inicial + tolerancia; tabla por regla y RR | La estructura M5 con swings 5/1 daba CHoCH en movimientos pequeños; el zigzag grande se veía bajista todo el día | | | |
+| sistema_v12 | M5 con swings 20/3; invalidación del FVG por vela inicial o intermedia; marca del FVG de cada entrada | pendiente | | | |
 
 ## Lectura de v01
 

@@ -70,6 +70,9 @@ Para esta prueba reemplaza las reglas 3–17.
 | 28 | P3: tolerancia en puntos para stop e invalidación | A |
 | 29 | P4: stop en la mecha de la vela inicial + tolerancia (sustituye la regla 15) | A |
 | 30 | P5: la entrada de la regla B es el cierre más allá del extremo desde la primera vela del tercer toque | A |
+| 31 | La estructura M5 usa swings mayores (20/3 en velas de 5 min) — v12 | A |
+| 32 | Parámetro: invalidar el FVG con la mecha de la vela inicial o de la vela intermedia; el stop sigue en la vela inicial + tolerancia | P |
+| 33 | Cada entrada marca su FVG (contorno amarillo + etiqueta con toque, rango y stop) | A |
 
 ## Descartado
 
