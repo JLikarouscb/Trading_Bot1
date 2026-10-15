@@ -17,7 +17,7 @@ Estado: **A** = acordado · **P** = propuesta pendiente de confirmar. **R** = Re
 | 3 | Swings del zigzag mayor: 20 velas a la izquierda y 3 a la derecha, zigzag alternado como LuxAlgo | A |
 | 4 | Ruptura = 2 cierres seguidos más allá del nivel | A |
 | 5 | Cambio de estructura mayor (CHoCH = MSS) solo si la estructura menor (5/1) ya giró en esa dirección | A |
-| 6 | Se dibujan en el zigzag mayor: CHoCH (cambio) y BOS (continuación) | P |
+| 6 | Se dibujan en el zigzag mayor: CHoCH (cambio) y BOS (continuación) | A |
 | 7 | El zigzag mayor marca la dirección de TODOS los trades: verde = solo largos, rojo = solo cortos | A |
 | 8 | Color del zigzag = estado de la estructura en cada momento (cambia en la vela del CHoCH) | A |
 | 9 | La estructura menor se calcula pero no se dibuja (solo sirve de filtro de la regla 5) | A |
