@@ -1,0 +1,733 @@
+// SISTEMA v10 · Versión simplificada según docs/acuerdos.md (las reglas fijas viven en ese documento)
+//
+// 1. Estructura mayor (zigzag 20/3 como LuxAlgo) = dirección de TODOS los trades: verde largos, rojo cortos.
+//    Ruptura = 2 cierres seguidos. CHoCH mayor solo si la estructura menor (5/1, no se dibuja) ya giró.
+//    Se dibujan CHoCH (cambio) y BOS (continuación). El color del zigzag cambia en la vela del CHoCH.
+// 2. Entrada: FVG formado dentro del último tramo mayor a favor, con punto medio en retroceso >= 50 %.
+//    Cada regreso al FVG es un "test"; hasta 3 tests pueden dar entrada mientras ninguna vela cierre
+//    más allá de la vela inicial del FVG. Máximo 2 entradas por tramo y 5 por killzone.
+// 3. Stop: extremo de las 5 velas desde la vela inicial del FVG hacia atrás. Objetivo: R fija (2 por defecto).
+//    El trade se cierra al terminar la killzone donde se abrió.
+// Zigzag y FVG con la lógica de "ICT Silver Bullet [LuxAlgo]" (código propio; original CC BY-NC-SA 4.0).
+// Resultados BRUTOS: sin spread ni deslizamiento.
+
+//@version=6
+strategy("Sistema v10", overlay = true, initial_capital = 10000, currency = currency.USD, pyramiding = 10, margin_long = 0.5, margin_short = 0.5, max_boxes_count = 200, max_lines_count = 500, max_labels_count = 500, max_polylines_count = 100)
+
+tz = "America/New_York"
+
+// ---------- Reglas fijas (acuerdos) ----------
+MIN_L     = 5
+MIN_R     = 1
+MAY_L     = 20
+MAY_R     = 3
+N_CONF    = 2
+FIB_MIN   = 0.5
+PER_LEG   = 2
+PER_SES   = 5
+MAX_TESTS = 3
+N_STOP    = 5
+EOD       = "1550-1600"
+COL_UP    = color.green
+COL_DN    = color.red
+
+// =====================================================================
+// AJUSTES (solo 4 grupos)
+// =====================================================================
+g1   = "1. Dirección"
+modo = input.string("ESTRUCTURA", "Modo", options = ["ESTRUCTURA", "POR SESIÓN"], group = g1, tooltip = "ESTRUCTURA: la dirección la da el zigzag mayor (modo normal).\nPOR SESIÓN: tú das el bias de cada sesión en el grupo 4 (modo de prueba).")
+
+gH  = "2. Killzones (hora Nueva York) · caja / operar"
+z1s = input.session("2000-2359", "Asia", group = gH, inline = "z1")
+z1b = input.bool(true, "caja", group = gH, inline = "z1")
+z1t = input.bool(true, "operar", group = gH, inline = "z1")
+z2s = input.session("0200-0500", "Londres", group = gH, inline = "z2")
+z2b = input.bool(true, "caja", group = gH, inline = "z2")
+z2t = input.bool(true, "operar", group = gH, inline = "z2")
+z3s = input.session("0830-0930", "NY 8:30", group = gH, inline = "z3")
+z3b = input.bool(true, "caja", group = gH, inline = "z3")
+z3t = input.bool(true, "operar", group = gH, inline = "z3")
+z4s = input.session("0930-1200", "NY AM", group = gH, inline = "z4")
+z4b = input.bool(true, "caja", group = gH, inline = "z4")
+z4t = input.bool(true, "operar", group = gH, inline = "z4")
+z5s = input.session("1200-1300", "Almuerzo", group = gH, inline = "z5")
+z5b = input.bool(true, "caja", group = gH, inline = "z5")
+z5t = input.bool(false, "operar", group = gH, inline = "z5")
+z6s = input.session("1330-1600", "NY PM", group = gH, inline = "z6")
+z6b = input.bool(true, "caja", group = gH, inline = "z6")
+z6t = input.bool(false, "operar", group = gH, inline = "z6")
+
+g3   = "3. Objetivo"
+tgtR = input.float(2.0, "Objetivo (R)", minval = 0.5, step = 0.5, group = g3)
+qty  = input.float(1.0, "Contratos por entrada", minval = 0.01, group = g3)
+
+gB = "4. Bias por sesión (solo modo POR SESIÓN) · Asia / Londres / NY open / NY close · L = largo, S = corto"
+b00 = input.string("-", "Hoy", options = ["-", "L", "S"], group = gB, inline = "r0")
+b01 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r0")
+b02 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r0")
+b03 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r0")
+b10 = input.string("-", "Hoy −1", options = ["-", "L", "S"], group = gB, inline = "r1")
+b11 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r1")
+b12 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r1")
+b13 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r1")
+b20 = input.string("-", "Hoy −2", options = ["-", "L", "S"], group = gB, inline = "r2")
+b21 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r2")
+b22 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r2")
+b23 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r2")
+b30 = input.string("-", "Hoy −3", options = ["-", "L", "S"], group = gB, inline = "r3")
+b31 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r3")
+b32 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r3")
+b33 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r3")
+b40 = input.string("-", "Hoy −4", options = ["-", "L", "S"], group = gB, inline = "r4")
+b41 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r4")
+b42 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r4")
+b43 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r4")
+b50 = input.string("-", "Hoy −5", options = ["-", "L", "S"], group = gB, inline = "r5")
+b51 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r5")
+b52 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r5")
+b53 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r5")
+b60 = input.string("-", "Hoy −6", options = ["-", "L", "S"], group = gB, inline = "r6")
+b61 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r6")
+b62 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r6")
+b63 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r6")
+b70 = input.string("-", "Hoy −7", options = ["-", "L", "S"], group = gB, inline = "r7")
+b71 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r7")
+b72 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r7")
+b73 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r7")
+b80 = input.string("-", "Hoy −8", options = ["-", "L", "S"], group = gB, inline = "r8")
+b81 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r8")
+b82 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r8")
+b83 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r8")
+b90 = input.string("-", "Hoy −9", options = ["-", "L", "S"], group = gB, inline = "r9")
+b91 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r9")
+b92 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r9")
+b93 = input.string("-", "", options = ["-", "L", "S"], group = gB, inline = "r9")
+
+var string[] B = array.from(b00, b01, b02, b03, b10, b11, b12, b13, b20, b21, b22, b23, b30, b31, b32, b33, b40, b41, b42, b43, b50, b51, b52, b53, b60, b61, b62, b63, b70, b71, b72, b73, b80, b81, b82, b83, b90, b91, b92, b93)
+
+// =====================================================================
+// FECHAS Y KILLZONES
+// =====================================================================
+dnum(int t) =>
+    t2 = t + 6 * 3600000
+    int(math.floor(timestamp(tz, year(t2, tz), month(t2, tz), dayofmonth(t2, tz), 12, 0) / 86400000))
+isBiz(int d) =>
+    w = (d + 4) % 7
+    w >= 1 and w <= 5
+
+curD  = dnum(time)
+lastD = dnum(last_bar_time)
+int off = na
+if lastD - curD <= 25 and isBiz(curD)
+    c = 0
+    if lastD > curD
+        for d = curD + 1 to lastD
+            if isBiz(d)
+                c += 1
+    off := c
+
+inZ(string ss) =>
+    not na(time(timeframe.period, ss, tz))
+in1 = inZ(z1s)
+in2 = inZ(z2s)
+in3 = inZ(z3s)
+in4 = inZ(z4s)
+in5 = inZ(z5s)
+in6 = inZ(z6s)
+zIdx   = (z1t and in1) ? 1 : (z2t and in2) ? 2 : (z3t and in3) ? 3 : (z4t and in4) ? 4 : (z5t and in5) ? 5 : (z6t and in6) ? 6 : 0
+zAny   = in1 ? 1 : in2 ? 2 : in3 ? 3 : in4 ? 4 : in5 ? 5 : in6 ? 6 : 0
+inWin  = zIdx != 0
+zStart = zIdx != 0 and zIdx != zIdx[1]
+zEnd   = array.from(false, in1[1] and not in1, in2[1] and not in2, in3[1] and not in3, in4[1] and not in4, in5[1] and not in5, in6[1] and not in6)
+inEod  = not na(time(timeframe.period, EOD, tz))
+
+// =====================================================================
+// ESTRUCTURA
+// =====================================================================
+var int[] chT = array.new_int()   // tiempo de cada CHoCH mayor
+var int[] chS = array.new_int()   // tendencia después del CHoCH
+
+type ZZ
+    int[]   d
+    int[]   x
+    float[] y
+    label[] lb
+    line[]  ev
+    label[] evl
+    int     trend
+    int     hiBrokenX
+    int     loBrokenX
+    int     refHx
+    int     refLx
+    int     cntUp
+    int     cntDn
+    bool    evNew
+    int     evDir
+    float   evLvl
+    float   evOrg
+    int     evN
+
+newZZ() =>
+    ZZ.new(array.new_int(), array.new_int(), array.new_float(), array.new_label(), array.new_line(), array.new_label(), 0, na, na, na, na, 0, 0, false, 0, na, na, 0)
+
+method tag(ZZ z) =>
+    string t = ""
+    if z.d.size() >= 3
+        t := z.d.get(0) == 1 ? (z.y.get(0) > z.y.get(2) ? "HH" : "LH") : (z.y.get(0) < z.y.get(2) ? "LL" : "HL")
+    t
+
+method push(ZZ z, int d, int bx, float py, bool lbl) =>
+    bool changed = false
+    if z.d.size() == 0 or z.d.get(0) != d
+        label b = na
+        if lbl
+            b := label.new(bx, py, "", style = d == 1 ? label.style_label_down : label.style_label_up, color = color.new(color.gray, 100), textcolor = color.gray, size = size.tiny)
+        z.d.unshift(d)
+        z.x.unshift(bx)
+        z.y.unshift(py)
+        z.lb.unshift(b)
+        changed := true
+        if z.d.size() > 60
+            z.d.pop()
+            z.x.pop()
+            z.y.pop()
+        if z.lb.size() > 220
+            label.delete(z.lb.pop())
+    else if (d == 1 and py > z.y.get(0)) or (d == -1 and py < z.y.get(0))
+        z.x.set(0, bx)
+        z.y.set(0, py)
+        label b = z.lb.get(0)
+        if not na(b)
+            label.set_xy(b, bx, py)
+        changed := true
+    if changed
+        label b = z.lb.get(0)
+        if not na(b)
+            label.set_text(b, z.tag())
+    changed
+
+method mark(ZZ z, int x1, float y, string txt, color c, bool up, bool solid) =>
+    z.ev.unshift(line.new(x1, y, bar_index, y, color = c, style = solid ? line.style_solid : line.style_dashed, width = solid ? 2 : 1))
+    z.evl.unshift(label.new(int(math.round((x1 + bar_index) / 2)), y, txt, style = up ? label.style_label_down : label.style_label_up, color = color.new(c, 100), textcolor = c, size = size.tiny))
+    if z.ev.size() > 120
+        line.delete(z.ev.pop())
+        label.delete(z.evl.pop())
+    true
+
+// Rupturas con N_CONF cierres seguidos. major = true dibuja CHoCH/BOS y registra los CHoCH.
+method breaks(ZZ z, bool allowUp, bool allowDn, bool major) =>
+    z.evNew := false
+    if z.d.size() >= 3
+        iH = z.d.get(0) == 1 ? 2 : 1
+        iL = z.d.get(0) == -1 ? 2 : 1
+        hy = z.y.get(iH)
+        hx = z.x.get(iH)
+        ly = z.y.get(iL)
+        lx = z.x.get(iL)
+        if na(z.refHx) or hx != z.refHx
+            z.refHx := hx
+            z.cntUp := 0
+        if na(z.refLx) or lx != z.refLx
+            z.refLx := lx
+            z.cntDn := 0
+        z.cntUp := close > hy ? z.cntUp + 1 : 0
+        z.cntDn := close < ly ? z.cntDn + 1 : 0
+        if z.cntUp >= N_CONF and (na(z.hiBrokenX) or hx != z.hiBrokenX)
+            isCh = z.trend < 1
+            if not isCh or allowUp
+                if isCh
+                    z.evN   += 1
+                    z.evNew := true
+                    z.evDir := 1
+                    z.evLvl := hy
+                    z.evOrg := ly
+                    if major
+                        chT.push(time)
+                        chS.push(1)
+                if major
+                    z.mark(hx, hy, isCh ? "CHoCH #" + str.tostring(z.evN) : "BOS", COL_UP, true, isCh)
+                z.trend     := 1
+                z.hiBrokenX := hx
+        if z.cntDn >= N_CONF and (na(z.loBrokenX) or lx != z.loBrokenX)
+            isCh = z.trend > -1
+            if not isCh or allowDn
+                if isCh
+                    z.evN   += 1
+                    z.evNew := true
+                    z.evDir := -1
+                    z.evLvl := ly
+                    z.evOrg := hy
+                    if major
+                        chT.push(time)
+                        chS.push(-1)
+                if major
+                    z.mark(lx, ly, isCh ? "CHoCH #" + str.tostring(z.evN) : "BOS", COL_DN, false, isCh)
+                z.trend     := -1
+                z.loBrokenX := lx
+    true
+
+var ZZ zm = newZZ()
+var ZZ zM = newZZ()
+
+mph = ta.pivothigh(high, MIN_L, MIN_R)
+mpl = ta.pivotlow(low, MIN_L, MIN_R)
+Mph = ta.pivothigh(high, MAY_L, MAY_R)
+Mpl = ta.pivotlow(low, MAY_L, MAY_R)
+
+if not na(mph)
+    zm.push(1, bar_index - MIN_R, mph, false)
+if not na(mpl)
+    zm.push(-1, bar_index - MIN_R, mpl, false)
+zm.breaks(true, true, false)
+
+if not na(Mph)
+    zM.push(1, bar_index - MAY_R, Mph, true)
+if not na(Mpl)
+    zM.push(-1, bar_index - MAY_R, Mpl, true)
+zM.breaks(zm.trend == 1, zm.trend == -1, true)
+
+trendColor(int t) =>
+    t == 1 ? COL_UP : t == -1 ? COL_DN : color.gray
+
+// ---------- Historial del zigzag mayor (polilíneas por tiempo) ----------
+var int[]   hM = array.new_int()
+var float[] hY = array.new_float()
+var int[]   hD = array.new_int()
+if zM.d.size() > 0
+    d0 = zM.d.get(0)
+    if hD.size() == 0 or hD.get(hD.size() - 1) != d0
+        hM.push(time[MAY_R])
+        hY.push(zM.y.get(0))
+        hD.push(d0)
+        if hM.size() > 9000
+            hM.shift()
+            hY.shift()
+            hD.shift()
+    else if hY.get(hY.size() - 1) != zM.y.get(0)
+        hM.set(hM.size() - 1, time[MAY_R])
+        hY.set(hY.size() - 1, zM.y.get(0))
+
+trendAt(int t) =>
+    int r = 0
+    if chT.size() > 0
+        for i = chT.size() - 1 to 0
+            if chT.get(i) <= t
+                r := chS.get(i)
+                break
+    r
+
+type PL
+    chart.point[] pts
+    int           tr
+
+var polyline[] pls = array.new<polyline>()
+var int   drawnN = -1
+var float drawnY = na
+var int   drawnC = -1
+needRedraw = hM.size() >= 2 ? (hM.size() != drawnN or hY.get(hY.size() - 1) != drawnY or chT.size() != drawnC) : false
+if barstate.islast and needRedraw
+    drawnN := hM.size()
+    drawnY := hY.get(hY.size() - 1)
+    drawnC := chT.size()
+    for p in pls
+        polyline.delete(p)
+    pls.clear()
+    runs = array.new<PL>()
+    chart.point[] cur = na
+    int curTr = na
+    for i = 1 to hM.size() - 1
+        t0 = hM.get(i - 1)
+        y0 = hY.get(i - 1)
+        t1 = hM.get(i)
+        y1 = hY.get(i)
+        cuts = array.from(t0)
+        for e in chT
+            if e > t0 and e < t1
+                cuts.push(e)
+        cuts.push(t1)
+        for j = 0 to cuts.size() - 2
+            ta = cuts.get(j)
+            tb = cuts.get(j + 1)
+            ya = t1 == t0 ? y0 : y0 + (y1 - y0) * (ta - t0) / (t1 - t0)
+            yb = t1 == t0 ? y1 : y0 + (y1 - y0) * (tb - t0) / (t1 - t0)
+            tr = trendAt(ta)
+            if na(cur) or tr != curTr
+                if not na(cur)
+                    runs.push(PL.new(cur, curTr))
+                cur   := array.new<chart.point>()
+                curTr := tr
+                cur.push(chart.point.from_time(ta, ya))
+            cur.push(chart.point.from_time(tb, yb))
+    if not na(cur)
+        runs.push(PL.new(cur, curTr))
+    if runs.size() > 0
+        first = math.max(0, runs.size() - 95)
+        for k = first to runs.size() - 1
+            r = runs.get(k)
+            pls.push(polyline.new(r.pts, xloc = xloc.bar_time, line_color = trendColor(r.tr), line_width = k == runs.size() - 1 ? 2 : 1))
+
+// =====================================================================
+// DIRECCIÓN
+// =====================================================================
+sesOf(int z) =>
+    z == 1 ? 0 : z == 2 ? 1 : z <= 4 ? 2 : 3
+biasSes = modo == "POR SESIÓN" and not na(off) and off <= 9 and zIdx != 0 ? B.get(off * 4 + sesOf(zIdx)) : "-"
+dir = modo == "ESTRUCTURA" ? zM.trend : biasSes == "L" ? 1 : biasSes == "S" ? -1 : 0
+
+// =====================================================================
+// KILLZONES (cajas)
+// =====================================================================
+type KZ
+    box   bx
+    label lb
+    float hi
+    float lo
+    int   x0
+
+kzRun(KZ k, string s, bool on, string name, color c) =>
+    inK = on and not na(time(timeframe.period, s, tz))
+    if inK and not inK[1]
+        k.x0 := bar_index
+        k.hi := high
+        k.lo := low
+        k.bx := box.new(bar_index, high, bar_index, low, border_color = color.new(c, 20), border_style = line.style_dashed, bgcolor = color.new(c, 90))
+        k.lb := label.new(bar_index, high, name, style = label.style_label_down, color = color.new(c, 100), textcolor = c, size = size.small)
+    else if inK and not na(k.bx)
+        k.hi := math.max(k.hi, high)
+        k.lo := math.min(k.lo, low)
+        box.set_right(k.bx, bar_index)
+        box.set_top(k.bx, k.hi)
+        box.set_bottom(k.bx, k.lo)
+        label.set_xy(k.lb, int(math.round((k.x0 + bar_index) / 2)), k.hi)
+    true
+
+var KZ k1 = KZ.new(na, na, na, na, na)
+var KZ k2 = KZ.new(na, na, na, na, na)
+var KZ k3 = KZ.new(na, na, na, na, na)
+var KZ k4 = KZ.new(na, na, na, na, na)
+var KZ k5 = KZ.new(na, na, na, na, na)
+var KZ k6 = KZ.new(na, na, na, na, na)
+kzRun(k1, z1s, z1b, "Asia", color.fuchsia)
+kzRun(k2, z2s, z2b, "London", color.blue)
+kzRun(k3, z3s, z3b, "NY 8:30", color.orange)
+kzRun(k4, z4s, z4b, "NY AM", color.teal)
+kzRun(k5, z5s, z5b, "Almuerzo", color.gray)
+kzRun(k6, z6s, z6b, "NY PM", color.purple)
+
+// =====================================================================
+// CALIDAD DE LOS CHoCH MAYORES (válido = avance 1:1 antes de perder el origen)
+// =====================================================================
+type Q
+    int   d
+    float org
+    float tgt
+    int   z
+
+var Q[]   qs   = array.new<Q>()
+var int[] qN   = array.new_int(7, 0)
+var int[] qOk  = array.new_int(7, 0)
+var int[] qBad = array.new_int(7, 0)
+if qs.size() > 0
+    for i = qs.size() - 1 to 0
+        q = qs.get(i)
+        bad = q.d == 1 ? close < q.org : close > q.org
+        ok  = q.d == 1 ? high >= q.tgt : low <= q.tgt
+        if bad or ok
+            if ok and not bad
+                qOk.set(q.z, qOk.get(q.z) + 1)
+            else
+                qBad.set(q.z, qBad.get(q.z) + 1)
+            qs.remove(i)
+if zM.evNew
+    qs.push(Q.new(zM.evDir, zM.evOrg, zM.evLvl + zM.evDir * math.abs(zM.evLvl - zM.evOrg), zAny))
+    qN.set(zAny, qN.get(zAny) + 1)
+
+// =====================================================================
+// TRAMO ACTIVO A FAVOR DE LA DIRECCIÓN
+// =====================================================================
+float legS  = na
+float legE  = na
+int   legSx = na
+int   legEx = na
+if dir != 0 and zM.d.size() >= 2
+    iEnd = zM.d.get(0) == dir ? 0 : 1
+    if iEnd + 1 < zM.d.size()
+        legE  := zM.y.get(iEnd)
+        legEx := zM.x.get(iEnd)
+        legS  := zM.y.get(iEnd + 1)
+        legSx := zM.x.get(iEnd + 1)
+
+retr(float p) =>
+    na(legS) or legS == legE ? na : (p - legE) / (legS - legE)
+fibPx(float f) =>
+    legE + f * (legS - legE)
+
+// =====================================================================
+// FVG
+// =====================================================================
+type F
+    int   d
+    float top
+    float bot
+    float stop
+    float inv
+    int   bar
+    int   tests
+    bool  armed
+
+var F[] fvgs = array.new<F>()
+hiN = ta.highest(high, N_STOP)
+loN = ta.lowest(low, N_STOP)
+
+// Tests e invalidación (antes de crear los FVG de esta vela)
+F     pick  = na
+float pRisk = na
+float pRetr = na
+var int curLeg   = na
+var int legCount = 0
+var int sesCount = 0
+if zStart
+    sesCount := 0
+if not na(legSx) and (na(curLeg) or legSx != curLeg)
+    curLeg   := legSx
+    legCount := 0
+legValid = not na(legS) and (dir == 1 ? close > legS : close < legS)
+canTrade = inWin and dir != 0 and legValid and legCount < PER_LEG and sesCount < PER_SES and not inEod
+
+if fvgs.size() > 0
+    for i = fvgs.size() - 1 to 0
+        f = fvgs.get(i)
+        dead = f.d == 1 ? close < f.inv : close > f.inv
+        if dead or f.tests >= MAX_TESTS
+            fvgs.remove(i)
+            continue
+        touch = f.d == 1 ? low < f.top : high > f.bot
+        if f.armed and touch
+            f.armed := false
+            f.tests += 1
+            if canTrade and f.d == dir and f.bar - 2 >= legSx and f.bar <= legEx + MAY_R
+                r    = retr((f.top + f.bot) / 2)
+                risk = f.d == 1 ? close - f.stop : f.stop - close
+                if not na(r) and r >= FIB_MIN and r < 1 and risk > 0
+                    if na(pick) or r > pRetr
+                        pick  := f
+                        pRisk := risk
+                        pRetr := r
+        else if not f.armed and (f.d == 1 ? low > f.top : high < f.bot)
+            f.armed := true
+
+if high < low[2]
+    fvgs.push(F.new(-1, low[2], high, hiN[2], high[2], bar_index, 0, true))
+if low > high[2]
+    fvgs.push(F.new(1, low, high[2], loN[2], low[2], bar_index, 0, true))
+if fvgs.size() > 200
+    fvgs.shift()
+
+// =====================================================================
+// SIMULACIÓN DE RR (1 a 3 R con el mismo stop)
+// =====================================================================
+type Vt
+    int     z
+    int     d
+    float   entry
+    float   stop
+    float   risk
+    int[]   st
+
+var Vt[]    vts = array.new<Vt>()
+var float[] rrs = array.from(1.0, 1.5, 2.0, 2.5, 3.0)
+var int[]   cW  = array.new_int(5, 0)
+var int[]   cL  = array.new_int(5, 0)
+var int[]   cTm = array.new_int(5, 0)
+var float[] sR  = array.new_float(5, 0)
+if vts.size() > 0
+    for i = vts.size() - 1 to 0
+        v = vts.get(i)
+        stopHit = v.d == 1 ? low <= v.stop : high >= v.stop
+        openLeft = 0
+        for j = 0 to 4
+            if v.st.get(j) == 0
+                t = v.entry + v.d * rrs.get(j) * v.risk
+                tgtHit = v.d == 1 ? high >= t : low <= t
+                if stopHit
+                    v.st.set(j, -1)
+                    cL.set(j, cL.get(j) + 1)
+                    sR.set(j, sR.get(j) - 1)
+                else if tgtHit
+                    v.st.set(j, 1)
+                    cW.set(j, cW.get(j) + 1)
+                    sR.set(j, sR.get(j) + rrs.get(j))
+                else if inEod or zEnd.get(v.z)
+                    v.st.set(j, 2)
+                    cTm.set(j, cTm.get(j) + 1)
+                    sR.set(j, sR.get(j) + (close - v.entry) * v.d / v.risk)
+                else
+                    openLeft += 1
+        if openLeft == 0
+            vts.remove(i)
+
+// =====================================================================
+// ENTRADA Y SALIDA
+// =====================================================================
+var int[]    entZ    = array.new_int()
+var float[]  entR    = array.new_float()
+var string[] openIds = array.new_string()
+var int[]    openZ   = array.new_int()
+var int      nEnt    = 0
+
+longE  = false
+shortE = false
+if not na(pick)
+    nEnt     += 1
+    legCount += 1
+    sesCount += 1
+    id = "E" + str.tostring(nEnt)
+    strategy.entry(id, dir == 1 ? strategy.long : strategy.short, qty = qty, comment = (dir == 1 ? "L" : "C") + str.tostring(nEnt))
+    strategy.exit("X" + id, from_entry = id, stop = pick.stop, limit = close + dir * tgtR * pRisk, comment_loss = "Stop", comment_profit = "Obj")
+    entZ.push(zIdx)
+    entR.push(pRisk)
+    openIds.push(id)
+    openZ.push(zIdx)
+    vts.push(Vt.new(zIdx, dir, close, pick.stop, pRisk, array.new_int(5, 0)))
+    box.new(pick.bar - 2, pick.top, bar_index, pick.bot, border_color = color.new(dir == 1 ? COL_UP : COL_DN, 40), bgcolor = color.new(dir == 1 ? COL_UP : COL_DN, 85))
+    longE  := dir == 1
+    shortE := dir == -1
+    alert((dir == 1 ? "LARGO " : "CORTO ") + syminfo.ticker + " a " + str.tostring(close, format.mintick) + " · stop " + str.tostring(pick.stop, format.mintick) + " · objetivo " + str.tostring(close + dir * tgtR * pRisk, format.mintick), alert.freq_once_per_bar_close)
+
+// Marcas de entrada abajo, sobre la barra de horas
+plotshape(longE, "Largo", shape.triangleup, location.bottom, COL_UP, text = "Largo", textcolor = COL_UP, size = size.tiny)
+plotshape(shortE, "Corto", shape.triangledown, location.bottom, COL_DN, text = "Corto", textcolor = COL_DN, size = size.tiny)
+alertcondition(longE, "v10 largo", "Sistema v10: LARGO en {{ticker}} a {{close}}")
+alertcondition(shortE, "v10 corto", "Sistema v10: CORTO en {{ticker}} a {{close}}")
+
+if openIds.size() > 0
+    for i = openIds.size() - 1 to 0
+        if zEnd.get(openZ.get(i))
+            strategy.close(openIds.get(i), comment = "Fin KZ")
+            openIds.remove(i)
+            openZ.remove(i)
+if inEod and strategy.position_size != 0
+    strategy.close_all(comment = "Fin día")
+    openIds.clear()
+    openZ.clear()
+
+// Resultados reales por killzone
+var int[]   kzN = array.new_int(7, 0)
+var int[]   kzW = array.new_int(7, 0)
+var float[] kzR = array.new_float(7, 0)
+var int     lastClosed = 0
+if strategy.closedtrades > lastClosed
+    for i = lastClosed to strategy.closedtrades - 1
+        eid = strategy.closedtrades.entry_id(i)
+        nId = int(str.tonumber(str.substring(eid, 1)))
+        if not na(nId) and nId >= 1 and nId <= entZ.size()
+            zz = entZ.get(nId - 1)
+            r  = (strategy.closedtrades.exit_price(i) - strategy.closedtrades.entry_price(i)) * math.sign(strategy.closedtrades.size(i)) / entR.get(nId - 1)
+            kzN.set(zz, kzN.get(zz) + 1)
+            kzR.set(zz, kzR.get(zz) + r)
+            if r > 0
+                kzW.set(zz, kzW.get(zz) + 1)
+    lastClosed := strategy.closedtrades
+
+// =====================================================================
+// FIBONACCI DEL TRAMO ACTIVO
+// =====================================================================
+var line[]  fl  = array.new_line()
+var label[] fla = array.new_label()
+var float[] fLv = array.from(0.0, 0.5, 0.618, 0.705, 0.786, 1.0)
+if barstate.islast
+    if fl.size() == 0
+        for i = 0 to 5
+            fl.push(line.new(bar_index, close, bar_index, close, color = color.gray, style = line.style_dotted))
+            fla.push(label.new(bar_index, close, "", style = label.style_none, textcolor = color.gray, size = size.tiny))
+    for i = 0 to 5
+        lv = fLv.get(i)
+        ln = fl.get(i)
+        lb = fla.get(i)
+        if not na(legS) and dir != 0
+            p = fibPx(lv)
+            c = lv == 0.5 ? color.gray : lv > 0.5 and lv < 1 ? color.red : color.silver
+            line.set_xy1(ln, legSx, p)
+            line.set_xy2(ln, bar_index + 10, p)
+            line.set_color(ln, c)
+            label.set_xy(lb, bar_index + 10, p)
+            label.set_text(lb, str.tostring(lv, "#.###") + " (" + str.tostring(p, format.mintick) + ")")
+            label.set_textcolor(lb, c)
+        else
+            line.set_xy1(ln, bar_index, close)
+            line.set_xy2(ln, bar_index, close)
+            label.set_text(lb, "")
+
+// =====================================================================
+// TABLAS
+// =====================================================================
+cellT(table t, int c, int r, string s, color col) =>
+    table.cell(t, c, r, s, text_color = col, text_size = size.small)
+
+var table tbR = table.new(position.top_right, 7, 7, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast
+    cellT(tbR, 0, 0, "Objetivo", color.white)
+    cellT(tbR, 1, 0, "Ganan", color.white)
+    cellT(tbR, 2, 0, "Pierden", color.white)
+    cellT(tbR, 3, 0, "Por hora", color.white)
+    cellT(tbR, 4, 0, "% acierto", color.white)
+    cellT(tbR, 5, 0, "R total", color.white)
+    cellT(tbR, 6, 0, "R prom.", color.white)
+    for j = 0 to 4
+        w = cW.get(j)
+        l = cL.get(j)
+        t = cTm.get(j)
+        n = w + l + t
+        c = rrs.get(j) == tgtR ? color.yellow : color.white
+        cellT(tbR, 0, j + 1, str.tostring(rrs.get(j), "#.#") + " R", c)
+        cellT(tbR, 1, j + 1, str.tostring(w), c)
+        cellT(tbR, 2, j + 1, str.tostring(l), c)
+        cellT(tbR, 3, j + 1, str.tostring(t), c)
+        cellT(tbR, 4, j + 1, n > 0 ? str.tostring(100.0 * w / n, "#") + " %" : "-", c)
+        cellT(tbR, 5, j + 1, str.tostring(sR.get(j), "#.#"), sR.get(j) >= 0 ? color.lime : color.red)
+        cellT(tbR, 6, j + 1, n > 0 ? str.tostring(sR.get(j) / n, "#.##") : "-", c)
+    cellT(tbR, 0, 6, "v10 · " + modo + " · " + str.tostring(nEnt) + " entradas · estructura " + (zM.trend == 1 ? "alcista" : zM.trend == -1 ? "bajista" : "-"), color.gray)
+
+var table tbZ = table.new(position.bottom_right, 7, 9, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast
+    zn = array.from("Fuera de KZ", "Asia", "Londres", "NY 8:30", "NY AM", "Almuerzo", "NY PM")
+    zt = array.from(false, z1t, z2t, z3t, z4t, z5t, z6t)
+    cellT(tbZ, 0, 0, "Killzone", color.white)
+    cellT(tbZ, 1, 0, "Trades", color.white)
+    cellT(tbZ, 2, 0, "% gan.", color.white)
+    cellT(tbZ, 3, 0, "R total", color.white)
+    cellT(tbZ, 4, 0, "R prom.", color.white)
+    cellT(tbZ, 5, 0, "CHoCH", color.white)
+    cellT(tbZ, 6, 0, "% CHoCH válido", color.white)
+    for k = 1 to 7
+        z  = k % 7
+        n  = kzN.get(z)
+        on = zt.get(z)
+        o  = qOk.get(z)
+        b  = qBad.get(z)
+        cellT(tbZ, 0, k, zn.get(z) + (z != 0 and not on ? " (no opera)" : ""), z == 0 or on ? color.white : color.gray)
+        cellT(tbZ, 1, k, z == 0 ? "-" : str.tostring(n), color.white)
+        cellT(tbZ, 2, k, n > 0 ? str.tostring(100.0 * kzW.get(z) / n, "#") + " %" : "-", color.white)
+        cellT(tbZ, 3, k, z == 0 ? "-" : str.tostring(kzR.get(z), "#.#"), kzR.get(z) >= 0 ? color.lime : color.red)
+        cellT(tbZ, 4, k, n > 0 ? str.tostring(kzR.get(z) / n, "#.##") : "-", color.white)
+        cellT(tbZ, 5, k, str.tostring(qN.get(z)), color.white)
+        cellT(tbZ, 6, k, o + b > 0 ? str.tostring(100.0 * o / (o + b), "#") + " %" : "-", color.white)
+
+var table tbB = table.new(position.bottom_left, 6, 11, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast and modo == "POR SESIÓN"
+    cellT(tbB, 0, 0, "Fila", color.white)
+    cellT(tbB, 1, 0, "Fecha", color.white)
+    cellT(tbB, 2, 0, "Asia", color.white)
+    cellT(tbB, 3, 0, "Londres", color.white)
+    cellT(tbB, 4, 0, "NY open", color.white)
+    cellT(tbB, 5, 0, "NY close", color.white)
+    d = lastD
+    for r = 0 to 9
+        while not isBiz(d)
+            d -= 1
+        cellT(tbB, 0, r + 1, r == 0 ? "Hoy" : "Hoy −" + str.tostring(r), color.white)
+        cellT(tbB, 1, r + 1, str.format_time(d * 86400000, "EEE dd MMM", "UTC"), color.white)
+        for cc = 0 to 3
+            bs = B.get(r * 4 + cc)
+            cellT(tbB, cc + 2, r + 1, bs, bs == "L" ? COL_UP : bs == "S" ? COL_DN : color.gray)
+        d -= 1

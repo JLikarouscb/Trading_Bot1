@@ -1,6 +1,6 @@
 # Acuerdos del sistema (fuente única de verdad)
 
-Última actualización: 2026-10-14. Si una regla no está aquí, no está acordada.
+Última actualización: 2026-10-14 (implementado en `sistema_v10.pine`). Si una regla no está aquí, no está acordada.
 Estado: **A** = acordado · **P** = propuesta pendiente de confirmar. **R** = Rechazado
 
 ## Mercado
@@ -31,15 +31,21 @@ Estado: **A** = acordado · **P** = propuesta pendiente de confirmar. **R** = Re
 | 12 | El precio entra al FVG y la vela cierra a favor de la dirección | R |
 | 13 | Dos entradas por tramo, máximo 5 por Sesion | A |
 | 14 | Solo dentro de killzones marcadas como "operar"; horarios editables | A |
-| 14.a | un FVG que no ha sido invalidado si es testeado 3 veces y el mercado no ha cerrado por abajo o por arriba de la vela inicial que lo formo, puede detonar una entrada si esta por mas alla del 50% del retroceso
+| 14.a | Cada regreso al FVG es un "test". Hasta 3 tests pueden detonar entrada mientras ninguna vela haya cerrado más allá de la vela inicial que lo formó (debajo en largos, arriba en cortos) y el FVG esté en el retroceso ≥ 50 %. Al tercer test el FVG se retira | A |
 ## Salida
 
 | # | Regla | Estado |
 | --- | --- | --- |
 | 15 | Stop: máximo (cortos) / mínimo (largos) de las 5 velas desde la vela inicial del FVG hacia atrás | A |
-| 16 | Objetivo: 2R fijo; la tabla compara 1R a 3R y el 0 % del tramo | A | -- Quita el % de tramo no lo entiendo
+| 16 | Objetivo: 2R fijo; la tabla compara 1R a 3R (se quitó el 0 % del tramo) | A |
 | 17 | El trade se cierra al terminar la killzone donde se abrió | A |
 
+
+## Visual
+
+| # | Regla | Estado |
+| --- | --- | --- |
+| 21 | Marcas de entrada ("Largo"/"Corto") abajo, sobre la barra de horas | A |
 
 ## Pruebas
 
@@ -47,7 +53,7 @@ Estado: **A** = acordado · **P** = propuesta pendiente de confirmar. **R** = Re
 | --- | --- | --- |
 | 18 | Modo normal = dirección por estructura. | A |
 | 19 | Elimina modo "bias por día" del script principal | A |
-| 20 | creamos el modo "bias por Sesion, escribeme los ultimos 10 dias habiles y usaremos 4 sesiones, asia, londres NY open NY close para cada dia, 
+| 20 | Modo de prueba "POR SESIÓN": 10 días hábiles (Hoy … Hoy −9) × 4 sesiones (Asia, Londres, NY open = NY 8:30 + NY AM, NY close = Almuerzo + NY PM). En este modo la dirección es la tuya, sin filtro de estructura | A |
 
 ## Descartado
 
