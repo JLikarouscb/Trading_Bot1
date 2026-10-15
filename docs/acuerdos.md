@@ -75,6 +75,10 @@ Para esta prueba reemplaza las reglas 3–17.
 | 33 | Cada entrada marca su FVG (contorno amarillo + etiqueta con toque, rango y stop) | A |
 | 35 | Regla B: la ruptura debe llegar dentro de 15 velas (editable) desde la primera vela del 3er toque; si llega fuera de horario o contra M5, el FVG se descarta para B — v16 | P |
 | 36 | Riesgo máximo opcional en puntos (0 = sin límite) para A y B — v16 | P |
+| 37 | Toque = cada máximo (cortos) / mínimo (largos) del zigzag menor 5/1 de 1 minuto que llega al FVG; pivotes seguidos del mismo tipo son el mismo toque. Sustituye P2 (queda como opción) — v17 | A |
+| 38 | Regla B desde el toque N (2, 3 o 4, por defecto 3) y en cualquier toque posterior; una entrada B por FVG. Ventana de la regla 35 cuenta desde la vela del toque — v17 | A |
+| 39 | Regla C: en el 2º toque el precio supera el extremo del 1º (barrida) y una vela cierra de vuelta fuera del FVG (debajo en cortos, arriba en largos) dentro de 10 velas. Si la barrida supera la vela inicial + tolerancia, el FVG ya está invalidado — v17 | A |
+| 40 | Stop de B y C configurable: vela inicial + tolerancia, o extremo del toque + tolerancia (B por defecto vela inicial, C por defecto extremo del toque) — v17 | A |
 | 34 | Regla A: el retroceso se mide sobre el último tramo del zigzag menor (5/1) Y del mayor (20/3) de 1 minuto a favor de M5, cada uno con su botón; el FVG debe haberse formado dentro del tramo. La tabla separa A·menor, A·mayor, A·ambos — v14 | A |
 
 ## Descartado

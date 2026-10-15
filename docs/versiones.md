@@ -22,6 +22,7 @@ Resultados brutos (sin spread). "R prom." = R promedio por entrada.
 | sistema_v14 | Regla A con dos botones: retrocesos del zigzag menor y del mayor M1 a la vez; tabla A·menor / A·mayor / A·ambos / B; Fibonacci de ambos tramos dibujado | pendiente | | | |
 | sistema_v15 | Modo análisis B (solo FVG de entradas B con sus toques 1-2-3) y líneas cortas de entrada/stop/objetivo por trade | pendiente | | | |
 | sistema_v16 | Corrige regla B: ruptura solo dentro de N velas desde el 3er toque (antes disparaba horas después con stop lejano); FVG de la entrada ya no se borra al invalidarse; riesgo máximo opcional y riesgo en pts en la etiqueta | pendiente | | | |
+| sistema_v17 | Toque = pivote del zigzag menor 5/1 que llega al FVG; B desde el toque N (2/3/4); regla C nueva (2º toque con barrida); stop de B/C en vela inicial o extremo del toque; fila C en la tabla. Compilado sin errores con pine_check | pendiente | | | |
 
 ## Lectura de v01
 
