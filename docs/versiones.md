@@ -12,6 +12,7 @@ Resultados brutos (sin spread). "R prom." = R promedio por entrada.
 | sistema_v04 | Estructura + FVG en un solo script; ruptura con 2 cierres seguidos (envolventes opcionales), MSS mayor exige giro de la menor, fondo azul/rojo, bias relativo "Hoy −N" con tabla de fechas | pendiente | | | |
 | sistema_v05 | Sin fondo de color: el zigzag mayor cambia a verde (alcista) / rojo (bajista); cajas de killzones Asia, Londres y NY 8:30–9:30 | 2 semanas con bias manual: +17.4 % (1 contrato fijo) | | | |
 | sistema_v06 | Zigzag dibujado en todo el gráfico: los dibujos ya no se borran a los 60 puntos (tope ajustable: mayor 220, menor 80, MSS 50) | pendiente | | | |
+| sistema_v07 | Zigzag mayor con polilíneas (todo el historial); MSS mayores numerados y evaluados (válido = avance 1:1 antes de perder el origen); tabla de calidad por sesión | pendiente | | | |
 
 ## Lectura de v01
 
@@ -28,3 +29,7 @@ Archivos en `pine/estructura/estructura_vNN.pine`.
 | v01 | Zigzag alternado igual que LuxAlgo (fusión de pivotes), HH/HL/LH/LL, MSS con el alto/bajo de referencia de LuxAlgo, BOS opcional, dos niveles (menor 5/1 y mayor 20/3), tabla de tendencia |
 
 Nota: la estructura de `fvg_v02` usaba el último pivote suelto (sin zigzag) y marcaba BOS en cada ruptura; por eso sus marcas no coincidían con LuxAlgo.
+
+## Prueba de bias invertido (sistema_v05/v06)
+
+Con el bias invertido el 100 % de los días: −4.31 % en 2 semanas (1 contrato fijo). Revisar cuántas entradas hubo: el filtro de estructura mayor bloquea gran parte de los trades cuando el bias contradice la estructura.
