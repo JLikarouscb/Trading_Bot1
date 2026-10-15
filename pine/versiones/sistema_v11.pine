@@ -29,6 +29,12 @@ L5 = input.int(5, "Swing M5: velas a la izquierda", minval = 1, maxval = 30, gro
 R5 = input.int(1, "derecha", minval = 1, maxval = 5, group = gS, inline = "s")
 N5 = input.int(1, "Cierres M5 para confirmar ruptura", minval = 1, maxval = 3, group = gS)
 
+gZ     = "1b. Zigzag de 1 minuto (solo referencia visual)"
+zMayOn = input.bool(true, "Zigzag mayor M1 (20/3)", group = gZ, inline = "zM")
+zMayC  = input.color(color.orange, "", group = gZ, inline = "zM")
+zMinOn = input.bool(true, "Zigzag menor M1 (5/1)", group = gZ, inline = "zm")
+zMinC  = input.color(color.blue, "", group = gZ, inline = "zm")
+
 gF       = "2. FVG"
 showInv  = input.bool(true, "P1 · Mostrar FVG invalidados (solo los del sentido M5)", group = gF)
 minGap   = input.int(10, "P2 · Velas mínimas entre toque y toque", minval = 1, maxval = 100, group = gF)
@@ -236,6 +242,57 @@ if barstate.islast and needRedraw
         for k = first to runs.size() - 1
             r = runs.get(k)
             pls.push(polyline.new(r.pts, xloc = xloc.bar_time, line_color = trendColor(r.tr), line_width = k == runs.size() - 1 ? 2 : 1))
+
+// =====================================================================
+// ZIGZAG DE 1 MINUTO: MAYOR (20/3) Y MENOR (5/1) · solo dibujo, no decide trades
+// =====================================================================
+type Z1
+    int[]   d
+    int[]   x
+    float[] y
+    line[]  ln
+    int     cap
+    color   c
+    int     w
+
+method zpush(Z1 z, int dd, int bx, float py) =>
+    if z.d.size() == 0 or z.d.get(0) != dd
+        line l = na
+        if z.d.size() > 0
+            l := line.new(z.x.get(0), z.y.get(0), bx, py, color = z.c, width = z.w)
+        z.d.unshift(dd)
+        z.x.unshift(bx)
+        z.y.unshift(py)
+        z.ln.unshift(l)
+        if z.d.size() > z.cap
+            z.d.pop()
+            z.x.pop()
+            z.y.pop()
+            line.delete(z.ln.pop())
+    else if (dd == 1 and py > z.y.get(0)) or (dd == -1 and py < z.y.get(0))
+        z.x.set(0, bx)
+        z.y.set(0, py)
+        l = z.ln.get(0)
+        if not na(l)
+            line.set_xy2(l, bx, py)
+    true
+
+var Z1 zz1M = Z1.new(array.new_int(), array.new_int(), array.new_float(), array.new_line(), 150, color.new(zMayC, 10), 2)
+var Z1 zz1m = Z1.new(array.new_int(), array.new_int(), array.new_float(), array.new_line(), 120, color.new(zMinC, 40), 1)
+pM1h = ta.pivothigh(high, 20, 3)
+pM1l = ta.pivotlow(low, 20, 3)
+pm1h = ta.pivothigh(high, 5, 1)
+pm1l = ta.pivotlow(low, 5, 1)
+if zMayOn
+    if not na(pM1h)
+        zz1M.zpush(1, bar_index - 3, pM1h)
+    if not na(pM1l)
+        zz1M.zpush(-1, bar_index - 3, pM1l)
+if zMinOn
+    if not na(pm1h)
+        zz1m.zpush(1, bar_index - 1, pm1h)
+    if not na(pm1l)
+        zz1m.zpush(-1, bar_index - 1, pm1l)
 
 // =====================================================================
 // KILLZONES
