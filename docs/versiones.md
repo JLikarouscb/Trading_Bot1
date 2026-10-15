@@ -12,7 +12,8 @@ Resultados brutos (sin spread). "R prom." = R promedio por entrada.
 | sistema_v04 | Estructura + FVG en un solo script; ruptura con 2 cierres seguidos (envolventes opcionales), MSS mayor exige giro de la menor, fondo azul/rojo, bias relativo "Hoy −N" con tabla de fechas | pendiente | | | |
 | sistema_v05 | Sin fondo de color: el zigzag mayor cambia a verde (alcista) / rojo (bajista); cajas de killzones Asia, Londres y NY 8:30–9:30 | 2 semanas con bias manual: +17.4 % (1 contrato fijo) | | | |
 | sistema_v06 | Zigzag dibujado en todo el gráfico: los dibujos ya no se borran a los 60 puntos (tope ajustable: mayor 220, menor 80, MSS 50) | pendiente | | | |
-| sistema_v07 | Zigzag mayor con polilíneas (todo el historial); MSS mayores numerados y evaluados (válido = avance 1:1 antes de perder el origen); tabla de calidad por sesión | pendiente | | | |
+| sistema_v07 | Zigzag mayor con polilíneas (todo el historial); MSS mayores numerados y evaluados (válido = avance 1:1 antes de perder el origen); tabla de calidad por sesión | MSS mayor válidos (2 semanas): total 55 %; NY 8:30–9:30 ~83 % (muestra pequeña); NY 9:30–12 36 % | | | |
+| sistema_v08 | Estructura mayor: nuevo extremo solo con cierre más allá (mecha = "barrido"); MSS mayor exige superar el 50 % del movimiento origen→extremo; polilíneas se redibujan solo si cambian | pendiente | | | |
 
 ## Lectura de v01
 
