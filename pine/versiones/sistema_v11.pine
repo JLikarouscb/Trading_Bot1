@@ -1,0 +1,466 @@
+// SISTEMA v11 · Estructura M5 obligatoria + entradas FVG en M1 (reglas A y B)
+//
+// ESTRUCTURA (M5, obligatoria): zigzag de 5 minutos como LuxAlgo (swing 5/1 sobre velas de 5 min).
+//   Verde = solo compras, rojo = solo ventas. Se dibujan CHoCH y BOS de M5 sobre el gráfico de 1 minuto.
+//   Se usa siempre la última vela de 5 min CERRADA (no repinta).
+// FVG (M1): solo los que van a favor de la estructura M5.
+//   Vela inicial = la primera de las 3 velas del FVG. El FVG se INVALIDA cuando el precio toca la mecha de
+//   la vela inicial (su máximo en cortos, su mínimo en largos), más la tolerancia en puntos.
+//   Un "toque" es la entrada del precio al FVG. Entre toque y toque deben pasar al menos N velas;
+//   si vuelve antes, cuenta como el mismo toque.
+// REGLA A: primer toque de un FVG cuyo punto medio está en el retroceso >= 50 % del último tramo M5.
+//   Entrada al cierre de la vela que toca.
+// REGLA B: tercer toque de un FVG no invalidado. Desde la primera vela del tercer toque se sigue el
+//   mínimo más bajo (cortos) / máximo más alto (largos); la entrada es la vela que CIERRA más allá de él.
+// STOP: mecha de la vela inicial del FVG + tolerancia. OBJETIVO: R fija; la tabla compara 1 a 3 R.
+// Lógica de zigzag y FVG basada en "ICT Silver Bullet [LuxAlgo]" (código propio; original CC BY-NC-SA 4.0).
+// Resultados BRUTOS: sin spread ni deslizamiento.
+
+//@version=6
+strategy("Sistema v11: M5 + FVG", overlay = true, initial_capital = 10000, currency = currency.USD, pyramiding = 20, margin_long = 0.5, margin_short = 0.5, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500, max_polylines_count = 100)
+
+tz = "America/New_York"
+
+// =====================================================================
+// AJUSTES
+// =====================================================================
+gS = "1. Estructura M5"
+L5 = input.int(5, "Swing M5: velas a la izquierda", minval = 1, maxval = 30, group = gS, inline = "s")
+R5 = input.int(1, "derecha", minval = 1, maxval = 5, group = gS, inline = "s")
+N5 = input.int(1, "Cierres M5 para confirmar ruptura", minval = 1, maxval = 3, group = gS)
+
+gF       = "2. FVG"
+showInv  = input.bool(true, "P1 · Mostrar FVG invalidados (solo los del sentido M5)", group = gF)
+minGap   = input.int(10, "P2 · Velas mínimas entre toque y toque", minval = 1, maxval = 100, group = gF)
+tol      = input.float(2.0, "P3 · Tolerancia en puntos (stop e invalidación)", minval = 0, step = 0.5, group = gF, tooltip = "El FVG se invalida y el stop se coloca en la mecha de la vela inicial MÁS esta tolerancia. Sirve para máximos o mínimos iguales.")
+showTch  = input.bool(true, "Numerar toques (1, 2, 3)", group = gF)
+
+gE      = "3. Entradas"
+ruleA   = input.bool(true, "Regla A · FVG en retroceso >= 50 % (primer toque)", group = gE)
+ruleB   = input.bool(true, "Regla B · Tercer toque con cierre de confirmación", group = gE)
+tgtR    = input.float(2.0, "Objetivo (R)", minval = 0.5, step = 0.5, group = gE)
+qty     = input.float(1.0, "Contratos por entrada", minval = 0.01, group = gE)
+fromT   = input.time(timestamp("2026-10-14T00:00:00-04:00"), "Medir desde", group = gE)
+kzOnly  = input.bool(false, "Operar solo dentro de killzones", group = gE)
+
+gK   = "4. Killzones (hora Nueva York)"
+kzOn = input.bool(true, "Dibujar cajas", group = gK)
+k1s  = input.session("2000-2359", "Asia", group = gK)
+k2s  = input.session("0200-0500", "Londres", group = gK)
+k3s  = input.session("0830-0930", "NY 8:30", group = gK)
+k4s  = input.session("0930-1200", "NY AM", group = gK)
+
+COL_UP = color.green
+COL_DN = color.red
+EOD    = "1550-1600"
+
+// =====================================================================
+// ESTRUCTURA M5 (calculada en velas de 5 minutos)
+// =====================================================================
+f5() =>
+    var int[]   d  = array.new_int()
+    var float[] y  = array.new_float()
+    var int[]   t  = array.new_int()
+    var int     tr = 0
+    var int     hiB = na
+    var int     loB = na
+    var int     rH = na
+    var int     rL = na
+    var int     cU = 0
+    var int     cD = 0
+    ph = ta.pivothigh(high, L5, R5)
+    pl = ta.pivotlow(low, L5, R5)
+    if not na(ph)
+        if d.size() == 0 or d.get(0) != 1
+            d.unshift(1)
+            y.unshift(ph)
+            t.unshift(time[R5])
+        else if ph > y.get(0)
+            y.set(0, ph)
+            t.set(0, time[R5])
+    if not na(pl)
+        if d.size() == 0 or d.get(0) != -1
+            d.unshift(-1)
+            y.unshift(pl)
+            t.unshift(time[R5])
+        else if pl < y.get(0)
+            y.set(0, pl)
+            t.set(0, time[R5])
+    if d.size() > 50
+        d.pop()
+        y.pop()
+        t.pop()
+    int   ev  = 0
+    float lvl = na
+    int   lvt = na
+    if d.size() >= 3
+        iH = d.get(0) == 1 ? 2 : 1
+        iL = d.get(0) == -1 ? 2 : 1
+        hy = y.get(iH)
+        ht = t.get(iH)
+        ly = y.get(iL)
+        lt = t.get(iL)
+        if na(rH) or ht != rH
+            rH := ht
+            cU := 0
+        if na(rL) or lt != rL
+            rL := lt
+            cD := 0
+        cU := close > hy ? cU + 1 : 0
+        cD := close < ly ? cD + 1 : 0
+        if cU >= N5 and (na(hiB) or ht != hiB)
+            ev  := tr < 1 ? 2 : 1
+            lvl := hy
+            lvt := ht
+            tr  := 1
+            hiB := ht
+        if cD >= N5 and (na(loB) or lt != loB)
+            ev  := tr > -1 ? -2 : -1
+            lvl := ly
+            lvt := lt
+            tr  := -1
+            loB := lt
+    int   zd  = d.size() > 0 ? d.get(0) : 0
+    float zy  = d.size() > 0 ? y.get(0) : na
+    int   zt  = d.size() > 0 ? t.get(0) : na
+    float ls  = na
+    float le  = na
+    int   lst = na
+    int   lEt = na
+    if tr != 0 and d.size() >= 2
+        iE = d.get(0) == tr ? 0 : 1
+        if iE + 1 < d.size()
+            le  := y.get(iE)
+            lEt := t.get(iE)
+            ls  := y.get(iE + 1)
+            lst := t.get(iE + 1)
+    [tr[1], ev[1], lvl[1], lvt[1], zd[1], zy[1], zt[1], ls[1], le[1], lst[1], lEt[1]]
+
+[t5, ev5, lv5, lvt5, zd5, zy5, zt5, ls5, le5, lst5, let5] = request.security(syminfo.tickerid, "5", f5(), lookahead = barmerge.lookahead_on)
+new5 = timeframe.change("5")
+dir  = t5
+
+trendColor(int t) =>
+    t == 1 ? COL_UP : t == -1 ? COL_DN : color.gray
+
+// ---------- CHoCH / BOS de M5 ----------
+var int[]   chT = array.new_int()
+var int[]   chS = array.new_int()
+var line[]  evL = array.new_line()
+var label[] evB = array.new_label()
+if new5 and ev5 != 0 and not na(lvt5)
+    up   = ev5 > 0
+    isCh = math.abs(ev5) == 2
+    c    = up ? COL_UP : COL_DN
+    if isCh
+        chT.push(time)
+        chS.push(up ? 1 : -1)
+    evL.unshift(line.new(lvt5, lv5, time, lv5, xloc = xloc.bar_time, color = c, style = isCh ? line.style_solid : line.style_dashed, width = isCh ? 2 : 1))
+    evB.unshift(label.new(int((lvt5 + time) / 2), lv5, isCh ? "CHoCH M5" : "BOS M5", xloc = xloc.bar_time, style = up ? label.style_label_down : label.style_label_up, color = color.new(c, 100), textcolor = c, size = size.tiny))
+    if evL.size() > 150
+        line.delete(evL.pop())
+        label.delete(evB.pop())
+
+// ---------- Zigzag M5 dibujado con polilíneas ----------
+var int[]   hM = array.new_int()
+var float[] hY = array.new_float()
+var int[]   hD = array.new_int()
+if new5 and zd5 != 0 and not na(zt5)
+    if hD.size() == 0 or hD.get(hD.size() - 1) != zd5
+        hM.push(zt5)
+        hY.push(zy5)
+        hD.push(zd5)
+        if hM.size() > 9000
+            hM.shift()
+            hY.shift()
+            hD.shift()
+    else if hM.get(hM.size() - 1) != zt5 or hY.get(hY.size() - 1) != zy5
+        hM.set(hM.size() - 1, zt5)
+        hY.set(hY.size() - 1, zy5)
+
+trendAt(int t) =>
+    int r = 0
+    if chT.size() > 0
+        for i = chT.size() - 1 to 0
+            if chT.get(i) <= t
+                r := chS.get(i)
+                break
+    r
+
+type PL
+    chart.point[] pts
+    int           tr
+
+var polyline[] pls = array.new<polyline>()
+var int   drawnN = -1
+var float drawnY = na
+var int   drawnC = -1
+needRedraw = hM.size() >= 2 ? (hM.size() != drawnN or hY.get(hY.size() - 1) != drawnY or chT.size() != drawnC) : false
+if barstate.islast and needRedraw
+    drawnN := hM.size()
+    drawnY := hY.get(hY.size() - 1)
+    drawnC := chT.size()
+    for p in pls
+        polyline.delete(p)
+    pls.clear()
+    runs = array.new<PL>()
+    chart.point[] cur = na
+    int curTr = na
+    for i = 1 to hM.size() - 1
+        t0 = hM.get(i - 1)
+        y0 = hY.get(i - 1)
+        t1 = hM.get(i)
+        y1 = hY.get(i)
+        cuts = array.from(t0)
+        for e in chT
+            if e > t0 and e < t1
+                cuts.push(e)
+        cuts.push(t1)
+        for j = 0 to cuts.size() - 2
+            ta0 = cuts.get(j)
+            tb0 = cuts.get(j + 1)
+            ya = t1 == t0 ? y0 : y0 + (y1 - y0) * (ta0 - t0) / (t1 - t0)
+            yb = t1 == t0 ? y1 : y0 + (y1 - y0) * (tb0 - t0) / (t1 - t0)
+            tr = trendAt(ta0)
+            if na(cur) or tr != curTr
+                if not na(cur)
+                    runs.push(PL.new(cur, curTr))
+                cur   := array.new<chart.point>()
+                curTr := tr
+                cur.push(chart.point.from_time(ta0, ya))
+            cur.push(chart.point.from_time(tb0, yb))
+    if not na(cur)
+        runs.push(PL.new(cur, curTr))
+    if runs.size() > 0
+        first = math.max(0, runs.size() - 95)
+        for k = first to runs.size() - 1
+            r = runs.get(k)
+            pls.push(polyline.new(r.pts, xloc = xloc.bar_time, line_color = trendColor(r.tr), line_width = k == runs.size() - 1 ? 2 : 1))
+
+// =====================================================================
+// KILLZONES
+// =====================================================================
+inZ(string ss) =>
+    not na(time(timeframe.period, ss, tz))
+inKZ = inZ(k1s) or inZ(k2s) or inZ(k3s) or inZ(k4s)
+inEod = inZ(EOD)
+
+type KZ
+    box   bx
+    label lb
+    float hi
+    float lo
+    int   x0
+
+kzRun(KZ k, string s, string name, color c) =>
+    inK = kzOn and not na(time(timeframe.period, s, tz))
+    if inK and not inK[1]
+        k.x0 := bar_index
+        k.hi := high
+        k.lo := low
+        k.bx := box.new(bar_index, high, bar_index, low, border_color = color.new(c, 20), border_style = line.style_dashed, bgcolor = color.new(c, 92))
+        k.lb := label.new(bar_index, high, name, style = label.style_label_down, color = color.new(c, 100), textcolor = c, size = size.small)
+    else if inK and not na(k.bx)
+        k.hi := math.max(k.hi, high)
+        k.lo := math.min(k.lo, low)
+        box.set_right(k.bx, bar_index)
+        box.set_top(k.bx, k.hi)
+        box.set_bottom(k.bx, k.lo)
+        label.set_xy(k.lb, int(math.round((k.x0 + bar_index) / 2)), k.hi)
+    true
+
+var KZ k1 = KZ.new(na, na, na, na, na)
+var KZ k2 = KZ.new(na, na, na, na, na)
+var KZ k3 = KZ.new(na, na, na, na, na)
+var KZ k4 = KZ.new(na, na, na, na, na)
+kzRun(k1, k1s, "Asia", color.fuchsia)
+kzRun(k2, k2s, "London", color.blue)
+kzRun(k3, k3s, "NY 8:30", color.orange)
+kzRun(k4, k4s, "NY AM", color.teal)
+
+// =====================================================================
+// FVG M1 A FAVOR DE M5
+// =====================================================================
+type F
+    int   d
+    float top
+    float bot
+    float ini
+    int   t
+    box   bx
+    int   touches
+    bool  inTouch
+    int   lastEnd
+    bool  doneA
+    bool  doneB
+    float b3Ref
+    bool  b3On
+
+var F[] fvgs = array.new<F>()
+
+retr(float p) =>
+    na(ls5) or na(le5) or ls5 == le5 ? na : (p - le5) / (ls5 - le5)
+
+canTrade = time >= fromT and (not kzOnly or inKZ) and not inEod and dir != 0
+
+// Señales de esta vela
+string sig   = ""
+int    sigD  = 0
+float  sigSt = na
+
+if fvgs.size() > 0
+    for i = fvgs.size() - 1 to 0
+        f = fvgs.get(i)
+        dead = f.d == 1 ? low < f.ini - tol : high > f.ini + tol
+        if dead
+            if showInv
+                box.set_right(f.bx, bar_index)
+                box.set_bgcolor(f.bx, color.new(color.gray, 88))
+                box.set_border_color(f.bx, color.new(color.gray, 60))
+            else
+                box.delete(f.bx)
+            fvgs.remove(i)
+            continue
+        box.set_right(f.bx, bar_index)
+        touching = f.d == 1 ? low <= f.top : high >= f.bot
+        newTouch = false
+        if touching and not f.inTouch
+            if na(f.lastEnd) or bar_index - f.lastEnd >= minGap
+                f.touches += 1
+                newTouch := true
+                if showTch
+                    label.new(bar_index, f.d == 1 ? low : high, str.tostring(f.touches), style = label.style_none, textcolor = color.gray, size = size.tiny)
+            f.inTouch := true
+        if touching
+            f.lastEnd := bar_index
+        else
+            f.inTouch := false
+        stop = f.d == 1 ? f.ini - tol : f.ini + tol
+        risk = f.d == 1 ? close - stop : stop - close
+        // Regla A: primer toque, FVG en retroceso >= 50 % del último tramo M5
+        if ruleA and newTouch and f.touches == 1 and not f.doneA and canTrade and f.d == dir and sig == ""
+            r = retr((f.top + f.bot) / 2)
+            inLeg = not na(lst5) and f.t >= lst5 and f.t <= let5 + (R5 + 1) * 300000
+            if inLeg and not na(r) and r >= 0.5 and r < 1 and risk > 0
+                f.doneA := true
+                sig   := "A"
+                sigD  := f.d
+                sigSt := stop
+        // Regla B: tercer toque; entrada al cerrar más allá del extremo desde la primera vela del toque
+        if ruleB and not f.doneB and f.touches >= 3
+            if newTouch and f.touches == 3
+                f.b3On  := true
+                f.b3Ref := f.d == 1 ? high : low
+            else if f.b3On
+                trig = f.d == 1 ? close > f.b3Ref : close < f.b3Ref
+                if trig and canTrade and f.d == dir and risk > 0 and sig == ""
+                    f.doneB := true
+                    sig   := "B"
+                    sigD  := f.d
+                    sigSt := stop
+                else
+                    f.b3Ref := f.d == 1 ? math.max(f.b3Ref, high) : math.min(f.b3Ref, low)
+
+// FVG nuevos de esta vela (solo a favor de M5)
+if dir == -1 and high < low[2]
+    b = box.new(bar_index - 2, low[2], bar_index, high, border_color = color.new(COL_DN, 50), bgcolor = color.new(COL_DN, 85))
+    fvgs.push(F.new(-1, low[2], high, high[2], time, b, 0, false, na, false, false, na, false))
+if dir == 1 and low > high[2]
+    b = box.new(bar_index - 2, low, bar_index, high[2], border_color = color.new(COL_UP, 50), bgcolor = color.new(COL_UP, 85))
+    fvgs.push(F.new(1, low, high[2], low[2], time, b, 0, false, na, false, false, na, false))
+if fvgs.size() > 150
+    fvgs.shift()
+
+// =====================================================================
+// SIMULACIÓN DE RR POR REGLA (1 a 3 R)
+// =====================================================================
+type Vt
+    int     rule
+    int     d
+    float   entry
+    float   stop
+    float   risk
+    int[]   st
+
+var Vt[]    vts = array.new<Vt>()
+var float[] rrs = array.from(1.0, 1.5, 2.0, 2.5, 3.0)
+// índice = regla * 5 + j  (regla 0 = A, 1 = B)
+var int[]   cW  = array.new_int(10, 0)
+var int[]   cL  = array.new_int(10, 0)
+var int[]   cT  = array.new_int(10, 0)
+var float[] sR  = array.new_float(10, 0)
+var int[]   nR  = array.new_int(2, 0)
+if vts.size() > 0
+    for i = vts.size() - 1 to 0
+        v = vts.get(i)
+        stopHit = v.d == 1 ? low <= v.stop : high >= v.stop
+        openLeft = 0
+        for j = 0 to 4
+            if v.st.get(j) == 0
+                ix = v.rule * 5 + j
+                tg = v.entry + v.d * rrs.get(j) * v.risk
+                tgtHit = v.d == 1 ? high >= tg : low <= tg
+                if stopHit
+                    v.st.set(j, -1)
+                    cL.set(ix, cL.get(ix) + 1)
+                    sR.set(ix, sR.get(ix) - 1)
+                else if tgtHit
+                    v.st.set(j, 1)
+                    cW.set(ix, cW.get(ix) + 1)
+                    sR.set(ix, sR.get(ix) + rrs.get(j))
+                else if inEod
+                    v.st.set(j, 2)
+                    cT.set(ix, cT.get(ix) + 1)
+                    sR.set(ix, sR.get(ix) + (close - v.entry) * v.d / v.risk)
+                else
+                    openLeft += 1
+        if openLeft == 0
+            vts.remove(i)
+
+// =====================================================================
+// ENTRADA
+// =====================================================================
+var int nEnt = 0
+if sig != ""
+    nEnt += 1
+    rk  = sigD == 1 ? close - sigSt : sigSt - close
+    id  = sig + str.tostring(nEnt)
+    strategy.entry(id, sigD == 1 ? strategy.long : strategy.short, qty = qty, comment = id)
+    strategy.exit("X" + id, from_entry = id, stop = sigSt, limit = close + sigD * tgtR * rk, comment_loss = "Stop", comment_profit = "Obj")
+    ru = sig == "A" ? 0 : 1
+    nR.set(ru, nR.get(ru) + 1)
+    vts.push(Vt.new(ru, sigD, close, sigSt, rk, array.new_int(5, 0)))
+    alert((sigD == 1 ? "LARGO " : "CORTO ") + "regla " + sig + " " + syminfo.ticker + " a " + str.tostring(close, format.mintick) + " · stop " + str.tostring(sigSt, format.mintick), alert.freq_once_per_bar_close)
+
+if inEod and strategy.position_size != 0
+    strategy.close_all(comment = "Fin día")
+
+plotshape(sig == "A" and sigD == 1, "Largo A", shape.triangleup, location.bottom, COL_UP, text = "Largo A", textcolor = COL_UP, size = size.tiny)
+plotshape(sig == "B" and sigD == 1, "Largo B", shape.triangleup, location.bottom, color.teal, text = "Largo B", textcolor = color.teal, size = size.tiny)
+plotshape(sig == "A" and sigD == -1, "Corto A", shape.triangledown, location.bottom, COL_DN, text = "Corto A", textcolor = COL_DN, size = size.tiny)
+plotshape(sig == "B" and sigD == -1, "Corto B", shape.triangledown, location.bottom, color.orange, text = "Corto B", textcolor = color.orange, size = size.tiny)
+alertcondition(sig != "" and sigD == 1, "v11 largo", "Sistema v11: LARGO en {{ticker}} a {{close}}")
+alertcondition(sig != "" and sigD == -1, "v11 corto", "Sistema v11: CORTO en {{ticker}} a {{close}}")
+
+// =====================================================================
+// TABLA: resultados por regla y por objetivo
+// =====================================================================
+cellT(table t, int c, int r, string s, color col) =>
+    table.cell(t, c, r, s, text_color = col, text_size = size.small)
+
+var table tb = table.new(position.top_right, 7, 5, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast
+    cellT(tb, 0, 0, "Regla", color.white)
+    cellT(tb, 1, 0, "Entradas", color.white)
+    for j = 0 to 4
+        cellT(tb, j + 2, 0, str.tostring(rrs.get(j), "#.#") + " R", rrs.get(j) == tgtR ? color.yellow : color.white)
+    for ru = 0 to 1
+        cellT(tb, 0, ru + 1, ru == 0 ? "A · Fibo >= 50 %" : "B · 3er toque", color.white)
+        cellT(tb, 1, ru + 1, str.tostring(nR.get(ru)), color.white)
+        for j = 0 to 4
+            ix = ru * 5 + j
+            n  = cW.get(ix) + cL.get(ix) + cT.get(ix)
+            txt = n > 0 ? str.tostring(sR.get(ix), "#.#") + " R · " + str.tostring(100.0 * cW.get(ix) / n, "#") + " %" : "-"
+            cellT(tb, j + 2, ru + 1, txt, sR.get(ix) >= 0 ? color.lime : color.red)
+    cellT(tb, 0, 3, "Cada celda = R total · % de ganadoras", color.gray)
+    cellT(tb, 0, 4, "M5 " + (dir == 1 ? "ALCISTA" : dir == -1 ? "BAJISTA" : "-") + " · desde " + str.format_time(fromT, "dd MMM", tz), dir == 1 ? COL_UP : dir == -1 ? COL_DN : color.gray)

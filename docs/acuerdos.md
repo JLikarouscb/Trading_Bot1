@@ -55,6 +55,22 @@ Estado: **A** = acordado · **P** = propuesta pendiente de confirmar. **R** = Re
 | 19 | Elimina modo "bias por día" del script principal | A |
 | 20 | Modo de prueba "POR SESIÓN": 10 días hábiles (Hoy … Hoy −9) × 4 sesiones (Asia, Londres, NY open = NY 8:30 + NY AM, NY close = Almuerzo + NY PM). En este modo la dirección es la tuya, sin filtro de estructura | A |
 
+## Modelo M5 + FVG (sistema_v11, en prueba desde 2026-10-14)
+
+Para esta prueba reemplaza las reglas 3–17.
+
+| # | Regla | Estado |
+| --- | --- | --- |
+| 22 | La estructura de 5 minutos es obligatoria y decide compras o ventas; los trades se toman en 1 minuto | A |
+| 23 | Regla A: FVG con punto medio en retroceso >= 50 % del último tramo M5 (preferencia 61.8 / 70.5 / 78.6); entrada al primer toque | A |
+| 24 | Regla B: tercer toque de un FVG no invalidado; entrada cuando una vela cierra más allá del mínimo más bajo (cortos) o máximo más alto (largos) desde la primera vela del tercer toque | A |
+| 25 | Un FVG se invalida cuando el precio toca la mecha de la vela inicial (+ tolerancia) | A |
+| 26 | P1: opción para ver los FVG invalidados (solo del sentido M5) | A |
+| 27 | P2: mínimo 10 velas entre toque y toque | A |
+| 28 | P3: tolerancia en puntos para stop e invalidación | A |
+| 29 | P4: stop en la mecha de la vela inicial + tolerancia (sustituye la regla 15) | A |
+| 30 | P5: la entrada de la regla B es el cierre más allá del extremo desde la primera vela del tercer toque | A |
+
 ## Descartado
 
 | Qué | Por qué |
