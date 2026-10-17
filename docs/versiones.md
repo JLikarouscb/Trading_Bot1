@@ -25,6 +25,7 @@ Resultados brutos (sin spread). "R prom." = R promedio por entrada.
 | sistema_v17 | Toque = pivote del zigzag menor 5/1 que llega al FVG; B desde el toque N (2/3/4); regla C nueva (2º toque con barrida); stop de B/C en vela inicial o extremo del toque; fila C en la tabla. Compilado sin errores con pine_check | pendiente | | | |
 | sistema_v18 | Tipos A/B/C/D; excluye "ambos zigzags"; anti-acumulación (máx. abiertas + distancia en R); tabla por sesión con CHoCH/BOS M5; CSV en Pine Logs. v17 (14-16 oct, 22 entradas): A menor +8R/60 %, A mayor +4R/100 % (2), ambos −1R (1), B −1R, C +4R/60 % a 2R | pendiente | | | |
 | sistema_v19 | Ajustes por tipo de entrada; sin etiquetas amarillas; SL/TP como cajas (las líneas se borraban por el límite de 500); fuera FVG invalidados, riesgo máximo y "solo killzones"; NY AM dividida; giro M5 por hora del pico | pendiente | | | |
+| sistema_v20 | SL/TP otra vez como líneas (cajas planas); línea de configuración al pie de la tabla; bitácora docs/pruebas.md | pendiente | | | |
 
 ## Lectura de v01
 
