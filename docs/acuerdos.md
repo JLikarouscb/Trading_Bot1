@@ -83,6 +83,10 @@ Para esta prueba reemplaza las reglas 3–17.
 | 42 | Las entradas que cumplen Fib en ambos zigzags se excluyen (botón; si se incluyen cuentan como A) — v18 | A |
 | 43 | Anti-acumulación: máximo 2 operaciones abiertas y ninguna entrada a menos de 1R de otra abierta del mismo lado (ambos editables) — v18 | P |
 | 44 | Análisis por sesión NY (9 franjas) de R por tipo y conteo de CHoCH/BOS M5; registro CSV en Pine Logs (ENT, RES, BLOQ, M5) — v18 | A |
+| 45 | v19: se quitan las etiquetas amarillas de texto, "mostrar FVG invalidados", "riesgo máximo en puntos" y "operar solo en killzones"; stop y objetivo se dibujan como cajas | A |
+| 46 | Ajustes agrupados por tipo de entrada (botón + parámetros + descripción del setup) | A |
+| 47 | Sesión NY AM dividida en 9:30-10:30 y 10:30-12 | A |
+| 48 | El giro de M5 se mide por la hora del pico: mínimo más bajo antes de un CHoCH alcista, máximo más alto antes de uno bajista (desde el swing roto hasta la ruptura) | A |
 | 34 | Regla A: el retroceso se mide sobre el último tramo del zigzag menor (5/1) Y del mayor (20/3) de 1 minuto a favor de M5, cada uno con su botón; el FVG debe haberse formado dentro del tramo. La tabla separa A·menor, A·mayor, A·ambos — v14 | A |
 
 ## Descartado
