@@ -79,6 +79,10 @@ Para esta prueba reemplaza las reglas 3–17.
 | 38 | Regla B desde el toque N (2, 3 o 4, por defecto 3) y en cualquier toque posterior; una entrada B por FVG. Ventana de la regla 35 cuenta desde la vela del toque — v17 | A |
 | 39 | Regla C: en el 2º toque el precio supera el extremo del 1º (barrida) y una vela cierra de vuelta fuera del FVG (debajo en cortos, arriba en largos) dentro de 10 velas. Si la barrida supera la vela inicial + tolerancia, el FVG ya está invalidado — v17 | A |
 | 40 | Stop de B y C configurable: vela inicial + tolerancia, o extremo del toque + tolerancia (B por defecto vela inicial, C por defecto extremo del toque) — v17 | A |
+| 41 | Nombres de entrada desde v18: A = Fib zigzag menor, B = Fib zigzag mayor, C = toque N (antes B), D = 2º toque con barrida (antes C) | A |
+| 42 | Las entradas que cumplen Fib en ambos zigzags se excluyen (botón; si se incluyen cuentan como A) — v18 | A |
+| 43 | Anti-acumulación: máximo 2 operaciones abiertas y ninguna entrada a menos de 1R de otra abierta del mismo lado (ambos editables) — v18 | P |
+| 44 | Análisis por sesión NY (9 franjas) de R por tipo y conteo de CHoCH/BOS M5; registro CSV en Pine Logs (ENT, RES, BLOQ, M5) — v18 | A |
 | 34 | Regla A: el retroceso se mide sobre el último tramo del zigzag menor (5/1) Y del mayor (20/3) de 1 minuto a favor de M5, cada uno con su botón; el FVG debe haberse formado dentro del tramo. La tabla separa A·menor, A·mayor, A·ambos — v14 | A |
 
 ## Descartado

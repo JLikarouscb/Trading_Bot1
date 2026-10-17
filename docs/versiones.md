@@ -23,6 +23,7 @@ Resultados brutos (sin spread). "R prom." = R promedio por entrada.
 | sistema_v15 | Modo análisis B (solo FVG de entradas B con sus toques 1-2-3) y líneas cortas de entrada/stop/objetivo por trade | pendiente | | | |
 | sistema_v16 | Corrige regla B: ruptura solo dentro de N velas desde el 3er toque (antes disparaba horas después con stop lejano); FVG de la entrada ya no se borra al invalidarse; riesgo máximo opcional y riesgo en pts en la etiqueta | pendiente | | | |
 | sistema_v17 | Toque = pivote del zigzag menor 5/1 que llega al FVG; B desde el toque N (2/3/4); regla C nueva (2º toque con barrida); stop de B/C en vela inicial o extremo del toque; fila C en la tabla. Compilado sin errores con pine_check | pendiente | | | |
+| sistema_v18 | Tipos A/B/C/D; excluye "ambos zigzags"; anti-acumulación (máx. abiertas + distancia en R); tabla por sesión con CHoCH/BOS M5; CSV en Pine Logs. v17 (14-16 oct, 22 entradas): A menor +8R/60 %, A mayor +4R/100 % (2), ambos −1R (1), B −1R, C +4R/60 % a 2R | pendiente | | | |
 
 ## Lectura de v01
 
