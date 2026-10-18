@@ -88,6 +88,9 @@ Para esta prueba reemplaza las reglas 3–17.
 | 47 | Sesión NY AM dividida en 9:30-10:30 y 10:30-12 | A |
 | 48 | El giro de M5 se mide por la hora del pico: mínimo más bajo antes de un CHoCH alcista, máximo más alto antes de uno bajista (desde el swing roto hasta la ruptura) | A |
 | 49 | Stop y objetivo como líneas de 8 velas (cajas planas); la tabla muestra la configuración activa; cada corrida se anota en docs/pruebas.md — v20 | A |
+| 50 | Las operaciones se toman en 1 minuto; M5 solo decide la dirección | A |
+| 51 | Filtro de confluencia opcional: M5 + zigzag mayor y/o menor de 1 minuto en la misma dirección (dirección del zigzag = última ruptura de su estructura) — v21 | P (en prueba) |
+| 52 | Prueba: cerrar las operaciones abiertas a las 9:30 NY porque la mayoría de los giros de M5 tienen su pico entre 9:30 y 10:30 — v21 | P (en prueba) |
 | 34 | Regla A: el retroceso se mide sobre el último tramo del zigzag menor (5/1) Y del mayor (20/3) de 1 minuto a favor de M5, cada uno con su botón; el FVG debe haberse formado dentro del tramo. La tabla separa A·menor, A·mayor, A·ambos — v14 | A |
 
 ## Descartado
