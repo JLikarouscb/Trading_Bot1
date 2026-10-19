@@ -17,3 +17,10 @@ Cómo usarla: al terminar una prueba, copia la línea gris de configuración que
 | 10 | 2026-10-18 | v26/v27 | 2–14 ago | igual que #6 | | | | | +11.80 % · DD 6.63 % · 36/85 · PF 1.49 | Fuera de muestra |
 | 11 | 2026-10-18 | v26/v27 | 19–30 jul | igual que #6 | | | | | +5.86 % · DD 1.57 % · 16/33 · PF 1.78 | Fuera de muestra |
 | — | | | 12–19 sep | | | | | | SIN CORRER | Falta: se saltó por un desplazamiento fuerte; hay que incluirlo |
+| 12 | 2026-10-18 | v28 | 4–18 oct | A on · B on · C off · D off · espera BOS M5 · pausa 15–18 · 0.5 % compuesto · obj 2R | | | off | off | +21.76 % · DD 5.37 % · 57/123 · PF 1.70 | |
+| 13 | 2026-10-18 | v28 | 20 sep–2 oct | igual que #12 | | | off | off | +5.94 % · DD 5.46 % · 52/133 · PF 1.18 | Fuera de muestra |
+| 14 | 2026-10-18 | v28 | 6–18 sep | igual que #12 | | | off | off | +2.99 % · DD 5.09 % · 47/129 · PF 1.09 | Fuera de muestra; incluye la semana del desplazamiento del 13 sep |
+| 15 | 2026-10-18 | v28 | 23 ago–4 sep | igual que #12 | | | off | off | +2.50 % · DD 15.69 % · 52/152 · PF 1.07 | Fuera de muestra; la caída más profunda (25–31 ago) |
+| 16 | 2026-10-18 | v28 | 9–21 ago | igual que #12 (capital mostrado 9K, verificar) | | | off | off | −3.88 % · DD 9.17 % · 38/115 · PF 0.88 | Fuera de muestra |
+| 17 | 2026-10-18 | v28 | 26 jul–7 ago | igual que #12 | | | off | off | +23.49 % · DD 3.00 % · 48/97 · PF 2.01 | Fuera de muestra |
+| 18 | 2026-10-18 | v28 | 12–24 jul | igual que #12 | | | off | off | +19.00 % · DD 4.10 % · 51/104 · PF 1.74 | Fuera de muestra |
