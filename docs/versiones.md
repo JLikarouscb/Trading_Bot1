@@ -30,6 +30,7 @@ Resultados brutos (sin spread). "R prom." = R promedio por entrada.
 | sistema_v22 | Tamaño de posición por % de riesgo (compuesto o fijo), paso/mín/máx de lote; la línea de configuración muestra el riesgo y el valor del punto | pendiente | | | |
 | sistema_v23 | Break even al X % del objetivo (+ colchón en puntos) en la estrategia y en la tabla de R; contador de salidas en BE | pendiente | | | |
 | sistema_v24 | Freno de rachas con operaciones en sombra y reanudación (sombra gana / M5 / siguiente sesión); límite diario en R; se quitan confluencia y FVG pintados | pendiente | | | |
+| sistema_v25 | Base v22 + sin FVG pintados, sin confluencia ni cierre 9:30, ventana de C fija; diagnóstico de cascadas (edad de tendencia M5, CHoCH en 8 h, marca de racha) | pendiente | | | |
 
 ## Lectura de v01
 
