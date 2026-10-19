@@ -89,15 +89,18 @@ Para esta prueba reemplaza las reglas 3–17.
 | 48 | El giro de M5 se mide por la hora del pico: mínimo más bajo antes de un CHoCH alcista, máximo más alto antes de uno bajista (desde el swing roto hasta la ruptura) | A |
 | 49 | Stop y objetivo como líneas de 8 velas (cajas planas); la tabla muestra la configuración activa; cada corrida se anota en docs/pruebas.md — v20 | A |
 | 50 | Las operaciones se toman en 1 minuto; M5 solo decide la dirección | A |
-| 51 | Filtro de confluencia opcional: M5 + zigzag mayor y/o menor de 1 minuto en la misma dirección (dirección del zigzag = última ruptura de su estructura) — v21 | P (en prueba) |
+| 51 | Filtro de confluencia opcional: M5 + zigzag mayor y/o menor de 1 minuto en la misma dirección — v21. Todas las combinaciones empeoraron el resultado; se quitó en v24 | R |
 | 52 | Prueba: cerrar las operaciones abiertas a las 9:30 NY porque la mayoría de los giros de M5 tienen su pico entre 9:30 y 10:30 — v21 | P (en prueba) |
 | 53 | Tamaño por riesgo: lotes = (% de la cuenta en USD) / (puntos de stop x valor del punto), redondeado al paso de lote (0.1), con lote mínimo y máximo. Por defecto 0.5 % de la cuenta actual — v22 | A |
 | 54 | Break even: al recorrer el 50 % del objetivo (1.25R con objetivo 2.5R) el stop pasa a la entrada + 1 punto; editable y apagable — v23 | P (en prueba) |
+| 55 | No se pintan los FVG; solo el que dio entrada (contorno amarillo) — v24 | A |
+| 56 | Freno de rachas: tras 2 pérdidas seguidas (por tipo o todas) se pausa y las señales se simulan en sombra; se reanuda cuando una en sombra gana, con nuevo CHoCH/BOS M5 o en la siguiente sesión. Límite diario en R opcional — v24 | P (en prueba) |
 | 34 | Regla A: el retroceso se mide sobre el último tramo del zigzag menor (5/1) Y del mayor (20/3) de 1 minuto a favor de M5, cada uno con su botón; el FVG debe haberse formado dentro del tramo. La tabla separa A·menor, A·mayor, A·ambos — v14 | A |
 
 ## Descartado
 
 | Qué | Por qué |
 | --- | --- |
+| v21: confluencia M5 + zigzags M1 | Todas las combinaciones empeoraron el resultado |
 | v08: extremo solo con cierre + MSS al 50 % | La estructura quedaba bajista todo el tiempo |
 | Fondo de color por estructura | Se prefirió colorear el zigzag |
