@@ -1,6 +1,6 @@
 // SISTEMA v25 · Estructura M5 obligatoria + entradas FVG en M1 · 4 tipos de entrada A, B, C, D
 // v25: BASE v22 (se descartan v23 break even y v24 freno). Sin FVG pintados (solo el que da entrada);
-//      sin confluencia ni cierre a las 9:30; la ventana de C queda fija en 15 velas (no visible).
+//      sin confluencia ni cierre a las 9:30; la ventana de C queda fija en 7 velas (no visible).
 //      DIAGNÓSTICO de pérdidas en cascada: tabla por edad de la tendencia M5 y por CHoCH M5 recientes,
 //      y marca "racha" en el gráfico cuando se encadenan 3 o más pérdidas.
 // v22: TAMAÑO POR RIESGO: el lotaje se calcula para arriesgar un % fijo de la cuenta en cada operación
@@ -92,7 +92,7 @@ ruleA    = fibMinOn or fibMayOn
 gC       = "3C · ENTRADA C — Toque N: desde el toque N (pivote del zigzag menor que llega al FVG), entrada al cierre más allá del mínimo (cortos) / máximo (largos) de la vela del toque"
 ruleB    = input.bool(true, "Activar C", group = gC)
 bN       = input.int(3, "Desde el toque", options = [2, 3, 4], group = gC)
-bWin     = 15   // ventana fija de C (evita entradas horas después del toque)
+bWin     = 7    // ventana fija de C (la de tu corrida del 18 oct; evita entradas horas después del toque)
 stB      = input.string("Vela inicial", "Stop en", options = ["Vela inicial", "Extremo del toque"], group = gC)
 
 gD       = "3D · ENTRADA D — 2º toque con barrida: el 2º toque supera el extremo del 1º y una vela cierra de vuelta fuera del FVG (abajo en cortos, arriba en largos)"

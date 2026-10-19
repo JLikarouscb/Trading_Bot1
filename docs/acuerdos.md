@@ -95,7 +95,7 @@ Para esta prueba reemplaza las reglas 3–17.
 | 54 | Break even: al recorrer el 50 % del objetivo (1.25R con objetivo 2.5R) el stop pasa a la entrada + 1 punto; editable y apagable — v23 | P (en prueba) |
 | 55 | No se pintan los FVG; solo el que dio entrada (contorno amarillo) — v24 | A |
 | 56 | Freno de rachas: tras 2 pérdidas seguidas (por tipo o todas) se pausa y las señales se simulan en sombra; se reanuda cuando una en sombra gana, con nuevo CHoCH/BOS M5 o en la siguiente sesión. Límite diario en R opcional — v24 | P (en prueba) |
-| 57 | Se vuelve a la base v22: break even (v23) y freno de rachas (v24) descartados; sin FVG pintados, sin confluencia, sin cierre 9:30; ventana de C fija en 15 velas — v25 | A |
+| 57 | Se vuelve a la base v22: break even (v23) y freno de rachas (v24) descartados; sin FVG pintados, sin confluencia, sin cierre 9:30; ventana de C fija en 7 velas — v25 | A |
 | 58 | Diagnóstico de cascadas: resultados por edad de la tendencia M5 y por CHoCH M5 en las 8 h previas; marca de racha con 3+ pérdidas seguidas — v25 | A |
 | 34 | Regla A: el retroceso se mide sobre el último tramo del zigzag menor (5/1) Y del mayor (20/3) de 1 minuto a favor de M5, cada uno con su botón; el FVG debe haberse formado dentro del tramo. La tabla separa A·menor, A·mayor, A·ambos — v14 | A |
 
