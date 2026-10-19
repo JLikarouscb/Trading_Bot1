@@ -92,6 +92,7 @@ Para esta prueba reemplaza las reglas 3–17.
 | 51 | Filtro de confluencia opcional: M5 + zigzag mayor y/o menor de 1 minuto en la misma dirección (dirección del zigzag = última ruptura de su estructura) — v21 | P (en prueba) |
 | 52 | Prueba: cerrar las operaciones abiertas a las 9:30 NY porque la mayoría de los giros de M5 tienen su pico entre 9:30 y 10:30 — v21 | P (en prueba) |
 | 53 | Tamaño por riesgo: lotes = (% de la cuenta en USD) / (puntos de stop x valor del punto), redondeado al paso de lote (0.1), con lote mínimo y máximo. Por defecto 0.5 % de la cuenta actual — v22 | A |
+| 54 | Break even: al recorrer el 50 % del objetivo (1.25R con objetivo 2.5R) el stop pasa a la entrada + 1 punto; editable y apagable — v23 | P (en prueba) |
 | 34 | Regla A: el retroceso se mide sobre el último tramo del zigzag menor (5/1) Y del mayor (20/3) de 1 minuto a favor de M5, cada uno con su botón; el FVG debe haberse formado dentro del tramo. La tabla separa A·menor, A·mayor, A·ambos — v14 | A |
 
 ## Descartado
