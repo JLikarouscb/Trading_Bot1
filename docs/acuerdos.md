@@ -100,6 +100,7 @@ Para esta prueba reemplaza las reglas 3–17.
 | 59 | Filtro de tendencia nueva: tras un CHoCH M5 esperar X horas (4) y/o el primer BOS a favor antes de operar — v26 | P (en prueba) |
 | 60 | Ejercicio de revisión manual de entradas con Bar Replay (docs/revision_entradas.md) | A |
 | 61 | Opción: la espera tras un CHoCH M5 se confirma con el primer BOS del zigzag mayor M1 (20/3) a favor de M5 — v27, para comparar contra v26 | P (en prueba) |
+| 62 | Pausa diaria 15:00–18:00 NY (editable): se cierra todo al inicio y no se abre nada hasta el final; evita operaciones abiertas en el corte diario y el fin de semana — v28 | A |
 | 34 | Regla A: el retroceso se mide sobre el último tramo del zigzag menor (5/1) Y del mayor (20/3) de 1 minuto a favor de M5, cada uno con su botón; el FVG debe haberse formado dentro del tramo. La tabla separa A·menor, A·mayor, A·ambos — v14 | A |
 
 ## Descartado

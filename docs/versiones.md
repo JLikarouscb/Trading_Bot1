@@ -33,6 +33,7 @@ Resultados brutos (sin spread). "R prom." = R promedio por entrada.
 | sistema_v25 | Base v22 + sin FVG pintados, sin confluencia ni cierre 9:30, ventana de C fija; diagnóstico de cascadas (edad de tendencia M5, CHoCH en 8 h, marca de racha) | pendiente | | | |
 | sistema_v26 | Filtro de tendencia nueva (esperar X horas o primer BOS tras CHoCH M5) con contador | pendiente | | | |
 | sistema_v27 | Igual a v26 + opción de esperar el primer BOS del zigzag mayor M1 (o X horas o ese BOS) tras un CHoCH M5 | pendiente | | | |
+| sistema_v28 | Pausa diaria configurable (15:00–18:00 NY por defecto): cierra todo y no abre; reemplaza el cierre de 15:50 | pendiente | | | |
 
 ## Lectura de v01
 

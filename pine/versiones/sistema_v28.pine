@@ -1,0 +1,997 @@
+// SISTEMA v28 · Estructura M5 obligatoria + entradas FVG en M1 · 4 tipos de entrada A, B, C, D
+// v28: PAUSA DIARIA configurable (por defecto 15:00-18:00 NY): al empezar se cierran las operaciones abiertas y no se abren
+//      nuevas hasta que termina. Cubre el corte diario 17-18 h y el fin de semana (el viernes todo queda cerrado a las 15:00).
+//      Antes solo se cerraba a las 15:50 y las entradas de 16:00 en adelante podían quedar abiertas el fin de semana.
+// v27: la espera tras un CHoCH M5 puede confirmarse con el primer BOS del ZIGZAG MAYOR de 1 minuto (20/3)
+//      a favor de M5, en lugar del BOS de M5 (más rápido). Para comparar contra v26.
+// v26: FILTRO "TENDENCIA NUEVA": después de un CHoCH de M5 no se opera hasta que pasen X horas o hasta el primer BOS
+//      a favor (la tendencia se confirma). Motivo: en la corrida del 18 oct, las entradas con tendencia M5 de menos
+//      de 4 h dieron −23R en 91 trades y las de más de 4 h +61R en 288.
+// v25: BASE v22 (se descartan v23 break even y v24 freno). Sin FVG pintados (solo el que da entrada);
+//      sin confluencia ni cierre a las 9:30; la ventana de C queda fija en 7 velas (no visible).
+//      DIAGNÓSTICO de pérdidas en cascada: tabla por edad de la tendencia M5 y por CHoCH M5 recientes,
+//      y marca "racha" en el gráfico cuando se encadenan 3 o más pérdidas.
+// v22: TAMAÑO POR RIESGO: el lotaje se calcula para arriesgar un % fijo de la cuenta en cada operación
+//      (lotes = riesgo en USD / (puntos de stop x valor del punto)), redondeado al paso de lote. Opción de contratos fijos.
+// v21: filtro de CONFLUENCIA opcional: M5 y el zigzag mayor y/o menor de 1 minuto deben marcar la misma dirección
+//      (dirección de cada zigzag = última ruptura de su estructura, como LuxAlgo). Opción de prueba: cerrar a las 9:30 NY.
+// v20: stop y objetivo otra vez como líneas (dibujadas como cajas planas para no chocar con el límite de 500 líneas);
+//      la tabla muestra la CONFIGURACIÓN activa en una línea para que cada captura guarde su setup.
+// v19: ajustes agrupados por tipo de entrada (botón + parámetros + descripción del setup);
+//      sin etiquetas amarillas de texto; stop y objetivo como cajas (las líneas se borraban por el límite de 500);
+//      se quitan "mostrar FVG invalidados", "riesgo máximo" y "operar solo en killzones";
+//      sesión NY AM dividida en 9:30-10:30 y 10:30-12; la tabla cuenta el GIRO de M5 por la hora del pico
+//      (mínimo más bajo antes de un CHoCH alcista / máximo más alto antes de uno bajista).
+// v18: NOMBRES NUEVOS: A = Fib zigzag menor · B = Fib zigzag mayor · C = toque N (antes B) · D = 2º toque con barrida (antes C).
+//      Opción para excluir las entradas que cumplen Fib en ambos zigzags (por defecto excluidas).
+//      Anti-acumulación: máximo de operaciones abiertas y distancia mínima (en R) a otra operación abierta.
+//      Tabla de análisis por sesión (R por tipo de entrada + cambios de color M5) y registro CSV en Pine Logs.
+// v17: TOQUE = cada máximo (cortos) / mínimo (largos) del zigzag menor 5/1 que llega al FVG; una oleada = un toque.
+//      (opción para volver al conteo anterior por "velas fuera").
+//      Regla B desde el toque N (2, 3 o 4) y en cualquier toque posterior; una entrada B por FVG.
+//      Regla C nueva: 2º toque que barre el extremo del 1º y cierra de vuelta fuera del FVG (dentro de N velas).
+//      Stop de B y C: vela inicial o extremo del toque. La tabla agrega la fila C.
+// v16: CORRIGE la regla B: la ruptura debe ocurrir dentro de una ventana de velas desde el inicio del
+//      tercer toque (antes podía disparar horas después, lejos del FVG, con el stop muy arriba).
+//      Si la ruptura llega fuera de horario o contra M5, el FVG se descarta para B (ya no queda "armado").
+//      El FVG marcado en una entrada ya no se borra cuando el precio lo invalida (antes desaparecía).
+//      Riesgo máximo opcional en puntos y la etiqueta muestra el riesgo de cada trade.
+// v15: "modo análisis B" (solo se dibujan los FVG de entradas B, con sus 3 toques) y líneas cortas
+//      de entrada, stop y objetivo en cada trade.
+// v14: la regla A revisa retrocesos en el zigzag MENOR y en el MAYOR de 1 minuto a la vez
+//      (cada uno con su botón) y la tabla separa A·menor, A·mayor, A·ambos y B para compararlos.
+// v13: el Fibonacci de la regla A se mide sobre el último tramo del zigzag MENOR de 1 minuto (5/1)
+//      a favor de M5, como lo traza el trader a mano (opción: menor M1, mayor M1 o M5).
+// v12: la estructura M5 usa swings MAYORES (20/3 en velas de 5 min) para que coincida con el zigzag grande;
+//      opción para invalidar el FVG con la vela inicial o con la vela intermedia;
+//      cada entrada marca el FVG que la generó (contorno amarillo + etiqueta con toque, rango y stop).
+//
+// ESTRUCTURA (M5, obligatoria): zigzag de 5 minutos como LuxAlgo (swing 5/1 sobre velas de 5 min).
+//   Verde = solo compras, rojo = solo ventas. Se dibujan CHoCH y BOS de M5 sobre el gráfico de 1 minuto.
+//   Se usa siempre la última vela de 5 min CERRADA (no repinta).
+// FVG (M1): solo los que van a favor de la estructura M5.
+//   Vela inicial = la primera de las 3 velas del FVG. El FVG se INVALIDA cuando el precio toca la mecha de
+//   la vela inicial (su máximo en cortos, su mínimo en largos), más la tolerancia en puntos.
+//   TOQUE (por defecto) = cada pivote del zigzag menor 5/1 (máximo en cortos, mínimo en largos) que llega al FVG.
+// REGLA A: primer contacto con un FVG cuyo punto medio está en el retroceso >= 50 % del último tramo
+//   del zigzag menor y/o mayor de 1 minuto. Entrada al cierre de la vela que toca.
+// REGLA B: toque N (o posterior) de un FVG no invalidado. Se sigue el mínimo más bajo (cortos) / máximo
+//   más alto (largos) desde la vela del toque; entrada al CIERRE más allá de él dentro de la ventana.
+// REGLA C: 2º toque que supera el extremo del 1º (barrida) y una vela cierra de vuelta fuera del FVG.
+// STOP: vela inicial + tolerancia (A siempre; B y C configurables). OBJETIVO: R fija; tabla 1 a 3 R.
+// Lógica de zigzag y FVG basada en "ICT Silver Bullet [LuxAlgo]" (código propio; original CC BY-NC-SA 4.0).
+// Resultados BRUTOS: sin spread ni deslizamiento.
+
+//@version=6
+strategy("Sistema v28: M5 + FVG", overlay = true, max_bars_back = 500, initial_capital = 10000, currency = currency.USD, pyramiding = 20, margin_long = 0.5, margin_short = 0.5, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500, max_polylines_count = 100)
+
+tz = "America/New_York"
+
+// =====================================================================
+// AJUSTES
+// =====================================================================
+gS = "1. Estructura M5"
+L5 = input.int(20, "Swing M5: velas a la izquierda", minval = 1, maxval = 30, group = gS, inline = "s")
+R5 = input.int(3, "derecha", minval = 1, maxval = 5, group = gS, inline = "s")
+N5 = input.int(1, "Cierres M5 para confirmar ruptura", minval = 1, maxval = 3, group = gS)
+
+gZ     = "1b. Zigzag del gráfico (solo referencia; se calcula en la temporalidad que tengas abierta)"
+zMayOn = input.bool(true, "Zigzag mayor (20/3)", group = gZ, inline = "zM")
+zMayC  = input.color(color.orange, "", group = gZ, inline = "zM")
+zMinOn = input.bool(true, "Zigzag menor (5/1)", group = gZ, inline = "zm")
+zMinC  = input.color(color.blue, "", group = gZ, inline = "zm")
+
+gF       = "2. FVG (común a todas las entradas)"
+tchMode  = input.string("Pivote del zigzag menor", "Qué cuenta como toque", options = ["Pivote del zigzag menor", "Velas fuera (P2)"], group = gF, tooltip = "Pivote: cada máximo (cortos) o mínimo (largos) del zigzag menor 5/1 que llega al FVG es un toque. Velas fuera: conteo anterior, el precio debe salir del FVG P2 velas.")
+minGap   = input.int(10, "P2 · Velas mínimas entre toques (solo modo velas fuera)", minval = 1, maxval = 100, group = gF)
+tol      = input.float(2.0, "P3 · Tolerancia en puntos (stop e invalidación)", minval = 0, step = 0.5, group = gF, tooltip = "El FVG se invalida y el stop se coloca en la mecha de la vela inicial MÁS esta tolerancia.")
+invMode  = input.string("Vela inicial", "Invalidar el FVG con la mecha de la", options = ["Vela inicial", "Vela intermedia"], group = gF)
+showTch  = input.bool(false, "Numerar toques (1, 2, 3)", group = gF)
+showSLTP = input.bool(true, "Líneas de stop y objetivo en cada operación", group = gF)
+
+gA       = "3A · ENTRADA A — Fib zigzag MENOR: primer contacto con un FVG a favor de M5 cuyo punto medio está en el retroceso >= 50 % del último tramo del zigzag menor (5/1). Entrada al cierre. Stop: vela inicial + tolerancia"
+fibMinOn = input.bool(true, "Activar A", group = gA)
+
+gB       = "3B · ENTRADA B — Fib zigzag MAYOR: igual que A pero el retroceso >= 50 % se mide en el último tramo del zigzag mayor (20/3)"
+fibMayOn = input.bool(true, "Activar B", group = gB)
+exAmb    = input.bool(true, "Excluir las que cumplen en ambos zigzags (si no, cuentan como A)", group = gB)
+ruleA    = fibMinOn or fibMayOn
+
+gC       = "3C · ENTRADA C — Toque N: desde el toque N (pivote del zigzag menor que llega al FVG), entrada al cierre más allá del mínimo (cortos) / máximo (largos) de la vela del toque"
+ruleB    = input.bool(true, "Activar C", group = gC)
+bN       = input.int(3, "Desde el toque", options = [2, 3, 4], group = gC)
+bWin     = 7    // ventana fija de C (la de tu corrida del 18 oct; evita entradas horas después del toque)
+stB      = input.string("Vela inicial", "Stop en", options = ["Vela inicial", "Extremo del toque"], group = gC)
+
+gD       = "3D · ENTRADA D — 2º toque con barrida: el 2º toque supera el extremo del 1º y una vela cierra de vuelta fuera del FVG (abajo en cortos, arriba en largos)"
+ruleC    = input.bool(true, "Activar D", group = gD)
+cWin     = input.int(10, "Velas máximas para cerrar de vuelta fuera del FVG", minval = 1, maxval = 50, group = gD)
+stC      = input.string("Extremo del toque", "Stop en", options = ["Vela inicial", "Extremo del toque"], group = gD)
+
+gE      = "4. Gestión"
+tgtR    = input.float(2.0, "Objetivo (R)", minval = 0.5, step = 0.5, group = gE)
+gR      = "4b. Tamaño de posición"
+sizeMd  = input.string("% de la cuenta", "Tamaño por", options = ["% de la cuenta", "Contratos fijos"], group = gR)
+riskPct = input.float(0.5, "Riesgo por operación (% de la cuenta)", minval = 0.05, maxval = 5, step = 0.05, group = gR, tooltip = "Con stop de 29 o de 40 puntos se arriesga lo mismo: el lotaje cambia.")
+capMd   = input.string("Cuenta actual (compuesto)", "Base del %", options = ["Cuenta actual (compuesto)", "Capital inicial (fijo)"], group = gR)
+lotStep = input.float(0.1, "Paso de lote", minval = 0.01, step = 0.01, group = gR)
+minLot  = input.float(0.1, "Lote mínimo", minval = 0.01, step = 0.01, group = gR)
+maxLot  = input.float(20, "Lote máximo (protección con stops muy chicos)", minval = 0.1, step = 0.5, group = gR)
+qty     = input.float(1.0, "Contratos fijos (solo si 'Tamaño por' = Contratos fijos)", minval = 0.01, group = gR)
+fromT   = input.time(timestamp("2026-10-14T00:00:00-04:00"), "Medir desde", group = gE)
+maxOpen = input.int(2, "Máximo de operaciones abiertas a la vez (0 = sin límite)", minval = 0, maxval = 20, group = gE)
+minDstR = input.float(1.0, "Distancia mínima a otra operación abierta del mismo lado, en R (0 = sin filtro)", minval = 0, step = 0.25, group = gE)
+logOn   = input.bool(true, "Escribir operaciones y giros M5 en Pine Logs", group = gE)
+newTr   = input.string("No filtrar", "Después de un CHoCH M5, esperar", options = ["No filtrar", "X horas", "Primer BOS a favor", "X horas o primer BOS", "Primer BOS zigzag mayor M1", "X horas o primer BOS zigzag mayor M1"], group = gE, tooltip = "Evita operar la tendencia recién nacida, que es donde se concentraron las cascadas de pérdidas.")
+newTrH  = input.float(4, "X horas", minval = 0.5, maxval = 24, step = 0.5, group = gE)
+
+gK   = "5. Killzones (hora Nueva York, solo dibujo)"
+kzOn = input.bool(true, "Dibujar cajas", group = gK)
+k1s  = input.session("2000-2359", "Asia", group = gK)
+k2s  = input.session("0200-0500", "Londres", group = gK)
+k3s  = input.session("0830-0930", "NY 8:30", group = gK)
+k4s  = input.session("0930-1200", "NY AM", group = gK)
+
+COL_UP = color.green
+COL_DN = color.red
+EOD    = input.session("1500-1800", "Pausa diaria: cerrar todo al inicio y no abrir hasta el final (hora NY)", group = "4. Gestión", tooltip = "Pepperstone cierra el NAS100 de 17:00 a 18:00 NY y el fin de semana. Con 15:00-18:00 ninguna operación queda abierta el viernes.")
+
+// =====================================================================
+// ESTRUCTURA M5 (calculada en velas de 5 minutos)
+// =====================================================================
+f5() =>
+    var int[]   d  = array.new_int()
+    var float[] y  = array.new_float()
+    var int[]   t  = array.new_int()
+    var int     tr = 0
+    var int     hiB = na
+    var int     loB = na
+    var int     rH = na
+    var int     rL = na
+    var int     cU = 0
+    var int     cD = 0
+    ph = ta.pivothigh(high, L5, R5)
+    pl = ta.pivotlow(low, L5, R5)
+    if not na(ph)
+        if d.size() == 0 or d.get(0) != 1
+            d.unshift(1)
+            y.unshift(ph)
+            t.unshift(time[R5])
+        else if ph > y.get(0)
+            y.set(0, ph)
+            t.set(0, time[R5])
+    if not na(pl)
+        if d.size() == 0 or d.get(0) != -1
+            d.unshift(-1)
+            y.unshift(pl)
+            t.unshift(time[R5])
+        else if pl < y.get(0)
+            y.set(0, pl)
+            t.set(0, time[R5])
+    if d.size() > 50
+        d.pop()
+        y.pop()
+        t.pop()
+    int   ev  = 0
+    float lvl = na
+    int   lvt = na
+    int   xt  = na   // hora del pico que origina el CHoCH
+    if d.size() >= 3
+        iH = d.get(0) == 1 ? 2 : 1
+        iL = d.get(0) == -1 ? 2 : 1
+        hy = y.get(iH)
+        ht = t.get(iH)
+        ly = y.get(iL)
+        lt = t.get(iL)
+        if na(rH) or ht != rH
+            rH := ht
+            cU := 0
+        if na(rL) or lt != rL
+            rL := lt
+            cD := 0
+        cU := close > hy ? cU + 1 : 0
+        cD := close < ly ? cD + 1 : 0
+        if cU >= N5 and (na(hiB) or ht != hiB)
+            if tr < 1
+                float mn = low
+                int   mt = time
+                for k = 1 to 400
+                    if time[k] < ht
+                        break
+                    if low[k] < mn
+                        mn := low[k]
+                        mt := time[k]
+                xt := mt
+            ev  := tr < 1 ? 2 : 1
+            lvl := hy
+            lvt := ht
+            tr  := 1
+            hiB := ht
+        if cD >= N5 and (na(loB) or lt != loB)
+            if tr > -1
+                float mx = high
+                int   mt = time
+                for k = 1 to 400
+                    if time[k] < lt
+                        break
+                    if high[k] > mx
+                        mx := high[k]
+                        mt := time[k]
+                xt := mt
+            ev  := tr > -1 ? -2 : -1
+            lvl := ly
+            lvt := lt
+            tr  := -1
+            loB := lt
+    int   zd  = d.size() > 0 ? d.get(0) : 0
+    float zy  = d.size() > 0 ? y.get(0) : na
+    int   zt  = d.size() > 0 ? t.get(0) : na
+    float ls  = na
+    float le  = na
+    int   lst = na
+    int   lEt = na
+    if tr != 0 and d.size() >= 2
+        iE = d.get(0) == tr ? 0 : 1
+        if iE + 1 < d.size()
+            le  := y.get(iE)
+            lEt := t.get(iE)
+            ls  := y.get(iE + 1)
+            lst := t.get(iE + 1)
+    [tr[1], ev[1], lvl[1], lvt[1], zd[1], zy[1], zt[1], ls[1], le[1], lst[1], lEt[1], xt[1]]
+
+[t5, ev5, lv5, lvt5, zd5, zy5, zt5, ls5, le5, lst5, let5, xt5] = request.security(syminfo.tickerid, "5", f5(), lookahead = barmerge.lookahead_on)
+new5 = timeframe.change("5")
+dir  = t5
+
+trendColor(int t) =>
+    t == 1 ? COL_UP : t == -1 ? COL_DN : color.gray
+
+// ---------- CHoCH / BOS de M5 ----------
+// Sesiones para el análisis (hora Nueva York)
+var string[] sesN = array.from("Asia 20-24", "Pre-Londres 0-2", "Londres 2-5", "Pre-NY 5-8:30", "NY 8:30-9:30", "NY 9:30-10:30", "NY 10:30-12", "Almuerzo 12-13:30", "NY PM 13:30-16", "Cierre 16-20")
+sesOf(int t) =>
+    hm = hour(t, tz) * 100 + minute(t, tz)
+    hm >= 2000 ? 0 : hm < 200 ? 1 : hm < 500 ? 2 : hm < 830 ? 3 : hm < 930 ? 4 : hm < 1030 ? 5 : hm < 1200 ? 6 : hm < 1330 ? 7 : hm < 1600 ? 8 : 9
+var int[] chSes = array.new_int(10, 0)   // CHoCH por hora en que se declara
+var int[] gSes  = array.new_int(10, 0)   // CHoCH por hora del pico que lo origina
+var int[]   chT = array.new_int()
+var int[]   chS = array.new_int()
+var line[]  evL = array.new_line()
+var label[] evB = array.new_label()
+var int     lastBos = na   // hora del último BOS de M5
+if new5 and ev5 != 0 and not na(lvt5)
+    up   = ev5 > 0
+    isCh = math.abs(ev5) == 2
+    c    = up ? COL_UP : COL_DN
+    if isCh
+        chT.push(time)
+        chS.push(up ? 1 : -1)
+    else
+        lastBos := time
+    if time >= fromT and isCh
+        sx = sesOf(time)
+        chSes.set(sx, chSes.get(sx) + 1)
+        if not na(xt5)
+            gx = sesOf(xt5)
+            gSes.set(gx, gSes.get(gx) + 1)
+        if logOn
+            log.info("M5;CHoCH " + (up ? "alcista" : "bajista") + ";declarado " + str.format_time(time, "yyyy-MM-dd HH:mm", tz) + ";pico " + (na(xt5) ? "-" : str.format_time(xt5, "yyyy-MM-dd HH:mm", tz) + ";" + sesN.get(sesOf(xt5))))
+    evL.unshift(line.new(lvt5, lv5, time, lv5, xloc = xloc.bar_time, color = c, style = isCh ? line.style_solid : line.style_dashed, width = isCh ? 2 : 1))
+    evB.unshift(label.new(int((lvt5 + time) / 2), lv5, isCh ? "CHoCH M5" : "BOS M5", xloc = xloc.bar_time, style = up ? label.style_label_down : label.style_label_up, color = color.new(c, 100), textcolor = c, size = size.tiny))
+    if evL.size() > 150
+        line.delete(evL.pop())
+        label.delete(evB.pop())
+
+// ---------- Zigzag M5 dibujado con polilíneas ----------
+var int[]   hM = array.new_int()
+var float[] hY = array.new_float()
+var int[]   hD = array.new_int()
+if new5 and zd5 != 0 and not na(zt5)
+    if hD.size() == 0 or hD.get(hD.size() - 1) != zd5
+        hM.push(zt5)
+        hY.push(zy5)
+        hD.push(zd5)
+        if hM.size() > 9000
+            hM.shift()
+            hY.shift()
+            hD.shift()
+    else if hM.get(hM.size() - 1) != zt5 or hY.get(hY.size() - 1) != zy5
+        hM.set(hM.size() - 1, zt5)
+        hY.set(hY.size() - 1, zy5)
+
+trendAt(int t) =>
+    int r = 0
+    if chT.size() > 0
+        for i = chT.size() - 1 to 0
+            if chT.get(i) <= t
+                r := chS.get(i)
+                break
+    r
+
+type PL
+    chart.point[] pts
+    int           tr
+
+var polyline[] pls = array.new<polyline>()
+var int   drawnN = -1
+var float drawnY = na
+var int   drawnC = -1
+needRedraw = hM.size() >= 2 ? (hM.size() != drawnN or hY.get(hY.size() - 1) != drawnY or chT.size() != drawnC) : false
+if barstate.islast and needRedraw
+    drawnN := hM.size()
+    drawnY := hY.get(hY.size() - 1)
+    drawnC := chT.size()
+    for p in pls
+        polyline.delete(p)
+    pls.clear()
+    runs = array.new<PL>()
+    chart.point[] cur = na
+    int curTr = na
+    for i = 1 to hM.size() - 1
+        t0 = hM.get(i - 1)
+        y0 = hY.get(i - 1)
+        t1 = hM.get(i)
+        y1 = hY.get(i)
+        cuts = array.from(t0)
+        for e in chT
+            if e > t0 and e < t1
+                cuts.push(e)
+        cuts.push(t1)
+        for j = 0 to cuts.size() - 2
+            ta0 = cuts.get(j)
+            tb0 = cuts.get(j + 1)
+            ya = t1 == t0 ? y0 : y0 + (y1 - y0) * (ta0 - t0) / (t1 - t0)
+            yb = t1 == t0 ? y1 : y0 + (y1 - y0) * (tb0 - t0) / (t1 - t0)
+            tr = trendAt(ta0)
+            if na(cur) or tr != curTr
+                if not na(cur)
+                    runs.push(PL.new(cur, curTr))
+                cur   := array.new<chart.point>()
+                curTr := tr
+                cur.push(chart.point.from_time(ta0, ya))
+            cur.push(chart.point.from_time(tb0, yb))
+    if not na(cur)
+        runs.push(PL.new(cur, curTr))
+    if runs.size() > 0
+        first = math.max(0, runs.size() - 95)
+        for k = first to runs.size() - 1
+            r = runs.get(k)
+            pls.push(polyline.new(r.pts, xloc = xloc.bar_time, line_color = trendColor(r.tr), line_width = k == runs.size() - 1 ? 2 : 1))
+
+// =====================================================================
+// ZIGZAG DE 1 MINUTO: MAYOR (20/3) Y MENOR (5/1) · solo dibujo, no decide trades
+// =====================================================================
+type Z1
+    int[]   d
+    int[]   x
+    int[]   tm
+    float[] y
+    line[]  ln
+    bool    draw
+    int     cap
+    color   c
+    int     w
+    int     tr  = 0
+    int     hiB
+    int     loB
+
+method zpush(Z1 z, int dd, int bx, int bt, float py) =>
+    if z.d.size() == 0 or z.d.get(0) != dd
+        line l = na
+        if z.draw and z.d.size() > 0
+            l := line.new(z.x.get(0), z.y.get(0), bx, py, color = z.c, width = z.w)
+        z.d.unshift(dd)
+        z.x.unshift(bx)
+        z.tm.unshift(bt)
+        z.y.unshift(py)
+        z.ln.unshift(l)
+        if z.d.size() > z.cap
+            z.d.pop()
+            z.x.pop()
+            z.tm.pop()
+            z.y.pop()
+            line.delete(z.ln.pop())
+    else if (dd == 1 and py > z.y.get(0)) or (dd == -1 and py < z.y.get(0))
+        z.x.set(0, bx)
+        z.tm.set(0, bt)
+        z.y.set(0, py)
+        l = z.ln.get(0)
+        if not na(l)
+            line.set_xy2(l, bx, py)
+    true
+
+var Z1 zz1M = Z1.new(array.new_int(), array.new_int(), array.new_int(), array.new_float(), array.new_line(), zMayOn, 150, color.new(zMayC, 10), 2)
+var Z1 zz1m = Z1.new(array.new_int(), array.new_int(), array.new_int(), array.new_float(), array.new_line(), zMinOn, 120, color.new(zMinC, 40), 1)
+pM1h = ta.pivothigh(high, 20, 3)
+pM1l = ta.pivotlow(low, 20, 3)
+pm1h = ta.pivothigh(high, 5, 1)
+pm1l = ta.pivotlow(low, 5, 1)
+if not na(pM1h)
+    zz1M.zpush(1, bar_index - 3, time[3], pM1h)
+if not na(pM1l)
+    zz1M.zpush(-1, bar_index - 3, time[3], pM1l)
+if not na(pm1h)
+    zz1m.zpush(1, bar_index - 1, time[1], pm1h)
+if not na(pm1l)
+    zz1m.zpush(-1, bar_index - 1, time[1], pm1l)
+
+// Rupturas del zigzag mayor de 1 minuto (cierre más allá del alto/bajo de referencia, como LuxAlgo)
+var int m1UpT = na   // hora de la última ruptura alcista del zigzag mayor M1
+var int m1DnT = na   // hora de la última ruptura bajista
+if zz1M.d.size() >= 3
+    iH = zz1M.d.get(0) == 1 ? 2 : 1
+    iL = zz1M.d.get(0) == -1 ? 2 : 1
+    if close > zz1M.y.get(iH) and (na(zz1M.hiB) or zz1M.x.get(iH) != zz1M.hiB)
+        zz1M.hiB := zz1M.x.get(iH)
+        m1UpT    := time
+    if close < zz1M.y.get(iL) and (na(zz1M.loB) or zz1M.x.get(iL) != zz1M.loB)
+        zz1M.loB := zz1M.x.get(iL)
+        m1DnT    := time
+
+// Último tramo a favor de M5 de un zigzag de 1 minuto: [inicio, fin, tiempo inicio, tiempo fin]
+legOf(Z1 z, int dd) =>
+    float s0 = na
+    float e0 = na
+    int   ts = na
+    int   te = na
+    if dd != 0 and z.d.size() >= 2
+        iE = z.d.get(0) == dd ? 0 : 1
+        if iE + 1 < z.d.size()
+            e0 := z.y.get(iE)
+            te := z.tm.get(iE)
+            s0 := z.y.get(iE + 1)
+            ts := z.tm.get(iE + 1)
+    [s0, e0, ts, te]
+
+[lsm, lem, ltsm, ltem] = legOf(zz1m, dir)
+[lsM, leM, ltsM, lteM] = legOf(zz1M, dir)
+// ¿El FVG (punto medio mid, vela inicial en ft) está en retroceso >= 50 % de ese tramo y se formó dentro de él?
+qual(float mid, int ft, float s0, float e0, int ts, int te, int lag) =>
+    bool ok = false
+    if not na(s0) and not na(e0) and s0 != e0 and not na(ts) and not na(te)
+        r = (mid - e0) / (s0 - e0)
+        ok := ft >= ts and ft <= te + lag and r >= 0.5 and r < 1
+    ok
+
+// =====================================================================
+// KILLZONES
+// =====================================================================
+inZ(string ss) =>
+    not na(time(timeframe.period, ss, tz))
+inKZ = inZ(k1s) or inZ(k2s) or inZ(k3s) or inZ(k4s)
+inEod = inZ(EOD)
+
+type KZ
+    box   bx
+    label lb
+    float hi
+    float lo
+    int   x0
+
+kzRun(KZ k, string s, string name, color c) =>
+    inK = kzOn and not na(time(timeframe.period, s, tz))
+    if inK and not inK[1]
+        k.x0 := bar_index
+        k.hi := high
+        k.lo := low
+        k.bx := box.new(bar_index, high, bar_index, low, border_color = color.new(c, 20), border_style = line.style_dashed, bgcolor = color.new(c, 92))
+        k.lb := label.new(bar_index, high, name, style = label.style_label_down, color = color.new(c, 100), textcolor = c, size = size.small)
+    else if inK and not na(k.bx)
+        k.hi := math.max(k.hi, high)
+        k.lo := math.min(k.lo, low)
+        box.set_right(k.bx, bar_index)
+        box.set_top(k.bx, k.hi)
+        box.set_bottom(k.bx, k.lo)
+        label.set_xy(k.lb, int(math.round((k.x0 + bar_index) / 2)), k.hi)
+    true
+
+var KZ k1 = KZ.new(na, na, na, na, na)
+var KZ k2 = KZ.new(na, na, na, na, na)
+var KZ k3 = KZ.new(na, na, na, na, na)
+var KZ k4 = KZ.new(na, na, na, na, na)
+kzRun(k1, k1s, "Asia", color.fuchsia)
+kzRun(k2, k2s, "London", color.blue)
+kzRun(k3, k3s, "NY 8:30", color.orange)
+kzRun(k4, k4s, "NY AM", color.teal)
+
+// =====================================================================
+// FVG M1 A FAVOR DE M5
+// =====================================================================
+type F
+    int   d
+    float top
+    float bot
+    float ini
+    float mid
+    int   t
+    box   bx
+    int   x0
+    int[] tb
+    int   touches = 0
+    bool  inTouch = false
+    int   lastEnd
+    bool  everT   = false
+    float tx              // extremo del toque actual (máximo en cortos, mínimo en largos)
+    float t1x             // extremo del 1er toque (para la barrida de la regla C)
+    int   lastSw  = -1
+    bool  doneA   = false
+    bool  doneB   = false
+    bool  b3On    = false
+    float b3Ref
+    int   b3Bar
+    bool  doneC   = false
+    bool  cOn     = false
+    bool  cSw     = false
+    int   cBar
+
+var F[] fvgs = array.new<F>()
+
+canTrade = time >= fromT and not inEod and dir != 0
+pivMode  = tchMode == "Pivote del zigzag menor"
+
+// Señales de esta vela
+string sig   = ""
+int    sigC  = -1   // 0 = A, 1 = B, 2 = C, 3 = D
+int    sigD  = 0
+float  sigSt = na
+F      sigF  = na
+
+// Contadores de oleadas del zigzag menor: un toque por oleada (los pivotes del mismo tipo seguidos se fusionan)
+var int swH = 0
+var int swL = 0
+var int lastPT = 0
+if not na(pm1h)
+    if lastPT != 1
+        swH += 1
+    lastPT := 1
+if not na(pm1l)
+    if lastPT != -1
+        swL += 1
+    lastPT := -1
+
+if fvgs.size() > 0
+    for i = fvgs.size() - 1 to 0
+        f = fvgs.get(i)
+        ref  = invMode == "Vela inicial" ? f.ini : f.mid
+        dead = f.d == 1 ? low < ref - tol : high > ref + tol
+        if dead
+            if not na(f.bx)
+                box.delete(f.bx)
+            fvgs.remove(i)
+            continue
+        if not na(f.bx)
+            box.set_right(f.bx, bar_index)
+        touching = f.d == 1 ? low <= f.top : high >= f.bot
+        firstContact = touching and not f.everT
+        if touching
+            f.everT := true
+
+        // ---- Conteo de toques ----
+        newTouch = false
+        int   tBar = na
+        float tExt = na
+        if pivMode
+            pv  = f.d == 1 ? pm1l : pm1h
+            sw  = f.d == 1 ? swL : swH
+            if not na(pv) and bar_index - 1 > f.x0 + 2 and (f.d == 1 ? pv <= f.top : pv >= f.bot)
+                if sw != f.lastSw
+                    f.lastSw := sw
+                    newTouch := true
+                    tBar := bar_index - 1
+                    tExt := pv
+                else
+                    f.tx := f.d == 1 ? math.min(f.tx, pv) : math.max(f.tx, pv)
+        else
+            if touching and not f.inTouch
+                if na(f.lastEnd) or bar_index - f.lastEnd >= minGap
+                    newTouch := true
+                    tBar := bar_index
+                    tExt := f.d == 1 ? low : high
+                f.inTouch := true
+            if touching
+                f.lastEnd := bar_index
+                if not newTouch and not na(f.tx)
+                    f.tx := f.d == 1 ? math.min(f.tx, low) : math.max(f.tx, high)
+            else
+                f.inTouch := false
+        if newTouch
+            f.touches += 1
+            if f.touches == 2
+                f.t1x := f.tx
+            f.tx := tExt
+            f.tb.push(tBar)
+            if showTch
+                label.new(tBar, tExt, str.tostring(f.touches), style = label.style_none, textcolor = color.gray, size = size.tiny)
+        // mientras B o C esperan ruptura, el extremo del toque sigue al precio
+        if not newTouch and (f.b3On or f.cOn)
+            f.tx := f.d == 1 ? math.min(f.tx, low) : math.max(f.tx, high)
+
+        stIni = f.d == 1 ? f.ini - tol : f.ini + tol
+        stTx  = na(f.tx) ? stIni : f.d == 1 ? f.tx - tol : f.tx + tol
+
+        // ---- Regla A: primer contacto, FVG en retroceso >= 50 % ----
+        if ruleA and firstContact and not f.doneA and canTrade and f.d == dir and sig == ""
+            mid   = (f.top + f.bot) / 2
+            okMin = fibMinOn and qual(mid, f.t, lsm, lem, ltsm, ltem, 2 * 60000)
+            okMay = fibMayOn and qual(mid, f.t, lsM, leM, ltsM, lteM, 4 * 60000)
+            rk    = f.d == 1 ? close - stIni : stIni - close
+            amb   = okMin and okMay
+            if (okMin or okMay) and not (amb and exAmb) and rk > 0
+                f.doneA := true
+                sigC  := okMin ? 0 : 1
+                sig   := okMin ? "A" : "B"
+                sigD  := f.d
+                sigSt := stIni
+                sigF  := f
+
+        // ---- Regla B: toque N o posterior; cierre más allá del extremo desde el toque ----
+        if ruleB and not f.doneB
+            if newTouch and f.touches >= bN
+                f.b3On  := true
+                f.b3Bar := tBar
+                // modo pivote: referencia = vela del pivote y las siguientes; modo velas: la vela del toque
+                f.b3Ref := pivMode ? (f.d == 1 ? math.max(high[1], high) : math.min(low[1], low)) : (f.d == 1 ? high : low)
+            chk = f.b3On and (pivMode or not newTouch)
+            if chk
+                if bar_index - f.b3Bar > bWin
+                    f.b3On := false
+                else
+                    trig = pivMode and newTouch ? (f.d == 1 ? close > high[1] : close < low[1]) : (f.d == 1 ? close > f.b3Ref : close < f.b3Ref)
+                    if trig
+                        f.b3On := false
+                        st = stB == "Extremo del toque" ? stTx : stIni
+                        rk = f.d == 1 ? close - st : st - close
+                        if canTrade and f.d == dir and rk > 0 and sig == ""
+                            f.doneB := true
+                            sig   := "C"
+                            sigC  := 2
+                            sigD  := f.d
+                            sigSt := st
+                            sigF  := f
+                    else
+                        f.b3Ref := f.d == 1 ? math.max(f.b3Ref, high) : math.min(f.b3Ref, low)
+
+        // ---- Regla C: 2º toque que barre el extremo del 1º y cierra de vuelta fuera del FVG ----
+        if ruleC and not f.doneC
+            if newTouch and f.touches == 2 and not na(f.t1x)
+                f.cOn  := true
+                f.cBar := tBar
+            if f.cOn
+                f.cSw := f.d == 1 ? f.tx < f.t1x : f.tx > f.t1x
+                if bar_index - f.cBar > cWin
+                    f.cOn   := false
+                    f.doneC := true
+                else if f.cSw and (f.d == 1 ? close > f.top : close < f.bot)
+                    f.cOn   := false
+                    f.doneC := true
+                    st = stC == "Extremo del toque" ? stTx : stIni
+                    rk = f.d == 1 ? close - st : st - close
+                    if canTrade and f.d == dir and rk > 0 and sig == ""
+                        sig   := "D"
+                        sigC  := 3
+                        sigD  := f.d
+                        sigSt := st
+                        sigF  := f
+
+// FVG nuevos de esta vela (solo a favor de M5)
+if dir == -1 and high < low[2]
+    box b = na   // los FVG no se pintan; solo el que da entrada
+    fvgs.push(F.new(d = -1, top = low[2], bot = high, ini = high[2], mid = high[1], t = time[2], bx = b, x0 = bar_index - 2, tb = array.new_int()))
+if dir == 1 and low > high[2]
+    box b = na
+    fvgs.push(F.new(d = 1, top = low, bot = high[2], ini = low[2], mid = low[1], t = time[2], bx = b, x0 = bar_index - 2, tb = array.new_int()))
+if fvgs.size() > 150
+    old = fvgs.shift()
+    if not na(old.bx)
+        box.delete(old.bx)
+
+// =====================================================================
+// SIMULACIÓN DE RR POR REGLA (1 a 3 R)
+// =====================================================================
+type Vt
+    int     rule
+    int     d
+    float   entry
+    float   stop
+    float   risk
+    int[]   st
+    string  id
+    int     ses
+    int     age   // edad de la tendencia M5 al entrar: 0 = <1 h, 1 = 1-4 h, 2 = >4 h
+    int     chop  // CHoCH M5 en las 8 h previas: 0 = 0-1, 1 = 2, 2 = 3 o más
+
+var Vt[]    vts = array.new<Vt>()
+var float[] rrs = array.from(1.0, 1.5, 2.0, 2.5, 3.0)
+// índice = regla * 5 + j  (regla 0 = A, 1 = B, 2 = C, 3 = D)
+var int[]   cW  = array.new_int(20, 0)
+var int[]   cL  = array.new_int(20, 0)
+var int[]   cT  = array.new_int(20, 0)
+var float[] sR  = array.new_float(20, 0)
+// por sesión (9) x tipo (4), con el objetivo elegido
+var float[] ssR = array.new_float(40, 0)
+var int[]   ssN = array.new_int(40, 0)
+var int[]   ssW = array.new_int(40, 0)
+var int     nBlk = 0
+// índice del objetivo elegido dentro de 1 / 1.5 / 2 / 2.5 / 3 R
+jT = tgtR <= 1.25 ? 0 : tgtR <= 1.75 ? 1 : tgtR <= 2.25 ? 2 : tgtR <= 2.75 ? 3 : 4
+var int[]   nR  = array.new_int(4, 0)
+// Diagnóstico: R / ganadas / total por edad de tendencia (3) y por CHoCH recientes (3)
+var float[] dgR = array.new_float(6, 0)
+var int[]   dgN = array.new_int(6, 0)
+var int[]   dgW = array.new_int(6, 0)
+var int     lsk = 0   // pérdidas seguidas (todas las entradas)
+if vts.size() > 0
+    for i = vts.size() - 1 to 0
+        v = vts.get(i)
+        stopHit = v.d == 1 ? low <= v.stop : high >= v.stop
+        openLeft = 0
+        for j = 0 to 4
+            if v.st.get(j) == 0
+                ix = v.rule * 5 + j
+                tg = v.entry + v.d * rrs.get(j) * v.risk
+                tgtHit = v.d == 1 ? high >= tg : low <= tg
+                float res = na
+                if stopHit
+                    v.st.set(j, -1)
+                    cL.set(ix, cL.get(ix) + 1)
+                    res := -1
+                else if tgtHit
+                    v.st.set(j, 1)
+                    cW.set(ix, cW.get(ix) + 1)
+                    res := rrs.get(j)
+                else if inEod
+                    v.st.set(j, 2)
+                    cT.set(ix, cT.get(ix) + 1)
+                    res := (close - v.entry) * v.d / v.risk
+                else
+                    openLeft += 1
+                if not na(res)
+                    sR.set(ix, sR.get(ix) + res)
+                    if j == jT
+                        sx = v.ses * 4 + v.rule
+                        ssR.set(sx, ssR.get(sx) + res)
+                        ssN.set(sx, ssN.get(sx) + 1)
+                        if res > 0
+                            ssW.set(sx, ssW.get(sx) + 1)
+                        dgR.set(v.age, dgR.get(v.age) + res)
+                        dgN.set(v.age, dgN.get(v.age) + 1)
+                        dgR.set(3 + v.chop, dgR.get(3 + v.chop) + res)
+                        dgN.set(3 + v.chop, dgN.get(3 + v.chop) + 1)
+                        if res > 0
+                            dgW.set(v.age, dgW.get(v.age) + 1)
+                            dgW.set(3 + v.chop, dgW.get(3 + v.chop) + 1)
+                            lsk := 0
+                        else if res < 0
+                            lsk += 1
+                            if lsk >= 3
+                                label.new(bar_index, high, "racha −" + str.tostring(lsk), style = label.style_label_down, color = color.new(color.red, 20), textcolor = color.white, size = size.tiny)
+                        if logOn
+                            log.info("RES;" + v.id + ";" + str.format_time(time, "yyyy-MM-dd HH:mm", tz) + ";" + (res > 0 ? "gana" : res < 0 ? "pierde" : "cero") + ";" + str.tostring(res, "#.##"))
+        if openLeft == 0
+            vts.remove(i)
+
+// =====================================================================
+// ENTRADA
+// =====================================================================
+// Tendencia nueva: esperar X horas y/o el primer BOS de M5 después del último CHoCH
+var int nWt = 0
+if sig != "" and newTr != "No filtrar" and chT.size() > 0
+    lastCh = chT.get(chT.size() - 1)
+    hOk    = time - lastCh >= newTrH * 3600000
+    m1On   = str.contains(newTr, "zigzag mayor M1")
+    m1T    = dir == 1 ? m1UpT : m1DnT
+    bOk    = m1On ? (not na(m1T) and m1T > lastCh) : (not na(lastBos) and lastBos > lastCh)
+    ok     = newTr == "X horas" ? hOk : (newTr == "Primer BOS a favor" or newTr == "Primer BOS zigzag mayor M1") ? bOk : (hOk or bOk)
+    if not ok
+        nWt += 1
+        if logOn
+            log.info("ESPERA;" + sig + ";" + str.format_time(time, "yyyy-MM-dd HH:mm", tz) + ";tendencia de " + str.tostring((time - lastCh) / 60000, "#") + " min, BOS " + (bOk ? "sí" : "no"))
+        sig := ""
+
+// Anti-acumulación: operaciones abiertas (con el objetivo elegido) y distancia a la más cercana del mismo lado
+if sig != ""
+    int  nOpen = 0
+    bool near  = false
+    for v in vts
+        if v.st.get(jT) == 0
+            nOpen += 1
+            if v.d == sigD and minDstR > 0 and math.abs(close - v.entry) < minDstR * v.risk
+                near := true
+    if (maxOpen > 0 and nOpen >= maxOpen) or near
+        nBlk += 1
+        if logOn
+            log.info("BLOQ;" + sig + ";" + str.format_time(time, "yyyy-MM-dd HH:mm", tz) + ";" + (near ? "cerca de otra operación" : "máximo de abiertas") + ";" + str.tostring(close, format.mintick))
+        sig := ""
+
+var int nEnt = 0
+if sig != ""
+    nEnt += 1
+    rk  = sigD == 1 ? close - sigSt : sigSt - close
+    pre = sig
+    id  = pre + str.tostring(nEnt)
+    // Tamaño: riesgo fijo en % → lotes según la distancia del stop
+    float q = qty
+    if sizeMd == "% de la cuenta"
+        base   = capMd == "Capital inicial (fijo)" ? strategy.initial_capital : strategy.equity
+        riskUSD = base * riskPct / 100
+        raw    = riskUSD / (rk * syminfo.pointvalue)
+        q := math.min(maxLot, math.floor(raw / lotStep) * lotStep)
+        if q < minLot
+            q := minLot
+            if logOn
+                log.warning("LOTE;" + id + ";stop de " + str.tostring(rk, "#.#") + " pts pide " + str.tostring(raw, "#.###") + " lotes; se usa el mínimo " + str.tostring(minLot) + " (riesgo mayor al " + str.tostring(riskPct) + " %)")
+    strategy.entry(id, sigD == 1 ? strategy.long : strategy.short, qty = q, comment = id + " · " + str.tostring(q, "#.##") + " lotes")
+    strategy.exit("X" + id, from_entry = id, stop = sigSt, limit = close + sigD * tgtR * rk, comment_loss = "Stop", comment_profit = "Obj")
+    ru = sigC
+    nR.set(ru, nR.get(ru) + 1)
+    sxE = sesOf(time)
+    ageM = chT.size() > 0 ? (time - chT.get(chT.size() - 1)) / 60000 : 99999
+    ageB = ageM < 60 ? 0 : ageM < 240 ? 1 : 2
+    int nCh8 = 0
+    if chT.size() > 0
+        for k = chT.size() - 1 to 0
+            if chT.get(k) < time - 8 * 3600000
+                break
+            nCh8 += 1
+    chopB = nCh8 <= 1 ? 0 : nCh8 == 2 ? 1 : 2
+    vts.push(Vt.new(ru, sigD, close, sigSt, rk, array.new_int(5, 0), id, sxE, ageB, chopB))
+    if logOn
+        log.info("ENT;" + id + ";" + sig + ";" + (sigD == 1 ? "largo" : "corto") + ";" + str.format_time(time, "yyyy-MM-dd HH:mm", tz) + ";" + str.tostring(close, format.mintick) + ";" + str.tostring(sigSt, format.mintick) + ";" + str.tostring(rk, "#.#") + ";" + sesN.get(sxE) + ";" + str.tostring(sigF.touches) + ";tendencia M5 " + str.tostring(ageM) + " min;CHoCH 8h " + str.tostring(nCh8))
+    tpPx = close + sigD * tgtR * rk
+    showThis = true
+    if showSLTP
+        // "líneas" hechas con cajas planas: usan el cupo de cajas y no se borran por el límite de líneas
+        box.new(bar_index, sigSt, bar_index + 8, sigSt, border_color = color.red, border_width = 2, bgcolor = color.new(color.red, 100))
+        box.new(bar_index, tpPx, bar_index + 8, tpPx, border_color = color.green, border_width = 2, bgcolor = color.new(color.green, 100))
+    if not na(sigF) and showThis
+        if na(sigF.bx)
+            sigF.bx := box.new(sigF.x0, sigF.top, bar_index, sigF.bot, border_color = color.yellow, bgcolor = color.new(sigD == 1 ? COL_UP : COL_DN, 85))
+        else
+            box.set_right(sigF.bx, bar_index)
+            box.set_border_color(sigF.bx, color.yellow)
+        sigF.bx := na   // se desconecta: queda fija aunque el FVG se invalide
+    alert((sigD == 1 ? "LARGO " : "CORTO ") + "regla " + sig + " " + syminfo.ticker + " a " + str.tostring(close, format.mintick) + " · stop " + str.tostring(sigSt, format.mintick), alert.freq_once_per_bar_close)
+
+if inEod and strategy.position_size != 0
+    strategy.close_all(comment = "Pausa diaria")
+
+plotshape(sig == "A" and sigD == 1, "Largo A", shape.triangleup, location.bottom, COL_UP, text = "A", textcolor = COL_UP, size = size.tiny)
+plotshape(sig == "B" and sigD == 1, "Largo B", shape.triangleup, location.bottom, color.lime, text = "B", textcolor = color.lime, size = size.tiny)
+plotshape(sig == "C" and sigD == 1, "Largo C", shape.triangleup, location.bottom, color.teal, text = "C", textcolor = color.teal, size = size.tiny)
+plotshape(sig == "D" and sigD == 1, "Largo D", shape.triangleup, location.bottom, color.aqua, text = "D", textcolor = color.aqua, size = size.tiny)
+plotshape(sig == "A" and sigD == -1, "Corto A", shape.triangledown, location.bottom, COL_DN, text = "A", textcolor = COL_DN, size = size.tiny)
+plotshape(sig == "B" and sigD == -1, "Corto B", shape.triangledown, location.bottom, color.maroon, text = "B", textcolor = color.maroon, size = size.tiny)
+plotshape(sig == "C" and sigD == -1, "Corto C", shape.triangledown, location.bottom, color.orange, text = "C", textcolor = color.orange, size = size.tiny)
+plotshape(sig == "D" and sigD == -1, "Corto D", shape.triangledown, location.bottom, color.fuchsia, text = "D", textcolor = color.fuchsia, size = size.tiny)
+alertcondition(sig != "" and sigD == 1, "v28 largo", "Sistema v28: LARGO en {{ticker}} a {{close}}")
+alertcondition(sig != "" and sigD == -1, "v28 corto", "Sistema v28: CORTO en {{ticker}} a {{close}}")
+
+// =====================================================================
+// TABLA: resultados por regla y por objetivo
+// =====================================================================
+cellT(table t, int c, int r, string s, color col) =>
+    table.cell(t, c, r, s, text_color = col, text_size = size.small)
+
+arw(int t) =>
+    t == 1 ? "▲" : t == -1 ? "▼" : "–"
+var bool cfgMerged = false
+var table tb = table.new(position.top_right, 7, 10, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast
+    cellT(tb, 0, 0, "Regla", color.white)
+    cellT(tb, 1, 0, "Entradas", color.white)
+    for j = 0 to 4
+        cellT(tb, j + 2, 0, str.tostring(rrs.get(j), "#.#") + " R", rrs.get(j) == tgtR ? color.yellow : color.white)
+    for ru = 0 to 3
+        cellT(tb, 0, ru + 1, ru == 0 ? "A · Fib zigzag menor" : ru == 1 ? "B · Fib zigzag mayor" : ru == 2 ? "C · toque " + str.tostring(bN) + "+" : "D · 2º toque + barrida", color.white)
+        cellT(tb, 1, ru + 1, str.tostring(nR.get(ru)), color.white)
+        for j = 0 to 4
+            ix = ru * 5 + j
+            n  = cW.get(ix) + cL.get(ix) + cT.get(ix)
+            txt = n > 0 ? str.tostring(sR.get(ix), "#.#") + " R · " + str.tostring(100.0 * cW.get(ix) / n, "#") + " %" : "-"
+            cellT(tb, j + 2, ru + 1, txt, sR.get(ix) >= 0 ? color.lime : color.red)
+    cellT(tb, 0, 5, "Bloqueadas por acumulación: " + str.tostring(nBlk) + " · por tendencia nueva: " + str.tostring(nWt), color.yellow)
+    cellT(tb, 0, 6, "Cada celda = R total · % de ganadoras", color.gray)
+    cfg = "Toque: " + (pivMode ? "pivote" : "velas fuera " + str.tostring(minGap)) + " · tol " + str.tostring(tol) + " · inval " + (invMode == "Vela inicial" ? "inicial" : "intermedia") +
+     " | A " + (fibMinOn ? "on" : "off") + " · B " + (fibMayOn ? "on" : "off") + (exAmb ? " (sin ambos)" : " (ambos=A)") +
+     " | C " + (ruleB ? "toque " + str.tostring(bN) + "+, " + "stop " + (stB == "Vela inicial" ? "inicial" : "toque") : "off") +
+     " | D " + (ruleC ? str.tostring(cWin) + " velas, stop " + (stC == "Vela inicial" ? "inicial" : "toque") : "off") +
+     " | tamaño " + (sizeMd == "% de la cuenta" ? str.tostring(riskPct) + " % " + (capMd == "Capital inicial (fijo)" ? "fijo" : "compuesto") + " · $/punto " + str.tostring(syminfo.pointvalue) : str.tostring(qty) + " fijos") + " | espera " + (newTr == "No filtrar" ? "no" : newTr == "Primer BOS a favor" ? "BOS M5" : newTr == "Primer BOS zigzag mayor M1" ? "BOS mayor M1" : str.tostring(newTrH) + " h" + (newTr == "X horas o primer BOS" ? " o BOS M5" : newTr == "X horas o primer BOS zigzag mayor M1" ? " o BOS mayor M1" : "")) + " | pausa " + EOD + " | obj " + str.tostring(tgtR) + "R · máx " + str.tostring(maxOpen) + " abiertas · dist " + str.tostring(minDstR) + "R"
+    cellT(tb, 0, 8, cfg, color.silver)
+    if not cfgMerged
+        table.merge_cells(tb, 0, 8, 6, 8)
+        cfgMerged := true
+    cellT(tb, 0, 7, "v28 · M5 " + str.tostring(L5) + "/" + str.tostring(R5) + " · " + (dir == 1 ? "ALCISTA" : dir == -1 ? "BAJISTA" : "-") + " · desde " + str.format_time(fromT, "dd MMM", tz), dir == 1 ? COL_UP : dir == -1 ? COL_DN : color.gray)
+
+// =====================================================================
+// TABLA 2: ANÁLISIS POR SESIÓN (objetivo elegido) + cambios de color M5
+// =====================================================================
+sesCell(int k) =>
+    n = ssN.get(k)
+    n == 0 ? "-" : (ssR.get(k) >= 0 ? "+" : "") + str.tostring(ssR.get(k), "#.#") + " R (" + str.tostring(ssW.get(k)) + "/" + str.tostring(n) + ")"
+var table ts = table.new(position.bottom_right, 8, 12, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast
+    cellT(ts, 0, 0, "Sesión (NY) · obj " + str.tostring(tgtR, "#.#") + " R", color.white)
+    for ru = 0 to 3
+        cellT(ts, ru + 1, 0, ru == 0 ? "A" : ru == 1 ? "B" : ru == 2 ? "C" : "D", color.white)
+    cellT(ts, 5, 0, "Total", color.white)
+    cellT(ts, 6, 0, "Giro M5 (pico)", color.white)
+    cellT(ts, 7, 0, "CHoCH declarado", color.white)
+    float gR = 0.0
+    int   gN = 0
+    int   gW = 0
+    for sx = 0 to 9
+        cellT(ts, 0, sx + 1, sesN.get(sx), color.white)
+        float tR = 0.0
+        int   tN = 0
+        int   tW = 0
+        for ru = 0 to 3
+            k = sx * 4 + ru
+            tR += ssR.get(k)
+            tN += ssN.get(k)
+            tW += ssW.get(k)
+            cellT(ts, ru + 1, sx + 1, sesCell(k), ssN.get(k) == 0 ? color.gray : ssR.get(k) >= 0 ? color.lime : color.red)
+        gR += tR
+        gN += tN
+        gW += tW
+        cellT(ts, 5, sx + 1, tN == 0 ? "-" : (tR >= 0 ? "+" : "") + str.tostring(tR, "#.#") + " R (" + str.tostring(tW) + "/" + str.tostring(tN) + ")", tN == 0 ? color.gray : tR >= 0 ? color.lime : color.red)
+        cellT(ts, 6, sx + 1, str.tostring(gSes.get(sx)), color.yellow)
+        cellT(ts, 7, sx + 1, str.tostring(chSes.get(sx)), color.silver)
+    cellT(ts, 0, 11, "Total · (ganadas/total)", color.white)
+    cellT(ts, 5, 11, (gR >= 0 ? "+" : "") + str.tostring(gR, "#.#") + " R (" + str.tostring(gW) + "/" + str.tostring(gN) + ")", gR >= 0 ? color.lime : color.red)
+
+// =====================================================================
+// TABLA 3: DIAGNÓSTICO (objetivo elegido) — ¿dónde se concentran las pérdidas?
+// =====================================================================
+dgCell(int k) =>
+    n = dgN.get(k)
+    n == 0 ? "-" : (dgR.get(k) >= 0 ? "+" : "") + str.tostring(dgR.get(k), "#.#") + " R (" + str.tostring(dgW.get(k)) + "/" + str.tostring(n) + ")"
+var table td = table.new(position.bottom_left, 2, 9, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast
+    cellT(td, 0, 0, "Diagnóstico · obj " + str.tostring(tgtR, "#.#") + " R", color.white)
+    cellT(td, 1, 0, "R (ganadas/total)", color.white)
+    cellT(td, 0, 1, "Tendencia M5 con < 1 h", color.silver)
+    cellT(td, 0, 2, "Tendencia M5 de 1 a 4 h", color.silver)
+    cellT(td, 0, 3, "Tendencia M5 de > 4 h", color.silver)
+    cellT(td, 0, 4, "CHoCH M5 en 8 h: 0-1", color.silver)
+    cellT(td, 0, 5, "CHoCH M5 en 8 h: 2", color.silver)
+    cellT(td, 0, 6, "CHoCH M5 en 8 h: 3 o más", color.silver)
+    for k = 0 to 5
+        cellT(td, 1, k + 1, dgCell(k), dgN.get(k) == 0 ? color.gray : dgR.get(k) >= 0 ? color.lime : color.red)
+    cellT(td, 0, 7, "Racha actual de pérdidas: " + str.tostring(lsk), color.orange)
+
+// =====================================================================
+// FIBONACCI DE LOS DOS TRAMOS ACTIVOS (menor en gris, mayor en naranja)
+// =====================================================================
+var line[]  fl  = array.new_line()
+var label[] fla = array.new_label()
+var float[] fLv = array.from(0.0, 0.5, 0.618, 0.705, 0.786, 1.0)
+if barstate.islast
+    if fl.size() == 0
+        for i = 0 to 11
+            fl.push(line.new(time, close, time, close, xloc = xloc.bar_time, style = line.style_dotted))
+            fla.push(label.new(time, close, "", xloc = xloc.bar_time, style = label.style_none, size = size.tiny))
+    for k = 0 to 1
+        on = k == 0 ? fibMinOn : fibMayOn
+        s0 = k == 0 ? lsm : lsM
+        e0 = k == 0 ? lem : leM
+        t0 = k == 0 ? ltsm : ltsM
+        cB = k == 0 ? color.gray : color.orange
+        for i = 0 to 5
+            lv = fLv.get(i)
+            ln = fl.get(k * 6 + i)
+            lb = fla.get(k * 6 + i)
+            if on and not na(s0) and not na(e0) and not na(t0) and dir != 0
+                p = e0 + lv * (s0 - e0)
+                c = lv > 0.5 and lv < 1 ? color.new(cB, 0) : color.new(cB, 50)
+                line.set_xy1(ln, t0, p)
+                line.set_xy2(ln, time, p)
+                line.set_extend(ln, extend.right)
+                line.set_color(ln, c)
+                label.set_xy(lb, time, p)
+                label.set_text(lb, (k == 0 ? "menor " : "mayor ") + str.tostring(lv, "#.###") + " (" + str.tostring(p, format.mintick) + ")")
+                label.set_textcolor(lb, c)
+            else
+                line.set_xy1(ln, time, close)
+                line.set_xy2(ln, time, close)
+                line.set_extend(ln, extend.none)
+                label.set_text(lb, "")
