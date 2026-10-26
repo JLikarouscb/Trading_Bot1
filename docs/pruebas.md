@@ -24,3 +24,5 @@ Cómo usarla: al terminar una prueba, copia la línea gris de configuración que
 | 16 | 2026-10-18 | v28 | 9–21 ago | igual que #12 (capital mostrado 9K, verificar) | | | off | off | −3.88 % · DD 9.17 % · 38/115 · PF 0.88 | Fuera de muestra |
 | 17 | 2026-10-18 | v28 | 26 jul–7 ago | igual que #12 | | | off | off | +23.49 % · DD 3.00 % · 48/97 · PF 2.01 | Fuera de muestra |
 | 18 | 2026-10-18 | v28 | 12–24 jul | igual que #12 | | | off | off | +19.00 % · DD 4.10 % · 51/104 · PF 1.74 | Fuera de muestra |
+| 19 | 2026-10-25 | v28 TradingView | 12–25 oct | 2 cierres M5 · tol 1 · A+B · 2.5R · 0.5 % compuesto · lote máx 10 (probable) | | | off | off | +2,620 USD · 98 operaciones | Export CSV |
+| 20 | 2026-10-25 | v28 cBot cTrader | 1–25 oct | igual que #19 · lote máx 20 · comisión del backtest 1.75 USD/lote | | | off | off | −1,763 USD neto · −708 bruto · 165 operaciones | 92/98 entradas coinciden con TradingView; costos y 4–11 oct explican la diferencia (docs/paridad_ctrader.md) |
