@@ -54,3 +54,4 @@ Nota: la estructura de `fvg_v02` usaba el último pivote suelto (sin zigzag) y m
 ## Prueba de bias invertido (sistema_v05/v06)
 
 Con el bias invertido el 100 % de los días: −4.31 % en 2 semanas (1 contrato fijo). Revisar cuántas entradas hubo: el filtro de estructura mayor bloquea gran parte de los trades cuando el bias contradice la estructura.
+| cBot v29 | ctrader/SistemaV29.cs: v28 + stop mínimo (10 pts) y spread máximo (10 % del riesgo); lote máx 10; reporta costo promedio del spread en R | pendiente | | | |
